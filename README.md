@@ -33,3 +33,17 @@ BlackIce simulates how modern security teams reason about suspicious account act
 - `decisions.jsonl` — explainable security decisions
 - `reports/dashboard.html` — offline investigation dashboard
 - `REPORT.md` — human-readable incident summary
+
+## Quickstart
+
+Run a full end-to-end demo (events → alerts → decisions → dashboard):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+python -m blackice replay
+python -m blackice decide
+python -m blackice report
+open reports/dashboard.html
