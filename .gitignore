@@ -1,14 +1,13 @@
-# Python cache
+# Python
 __pycache__/
 *.pyc
-*.pyo
-
-# macOS
-.DS_Store
-
-# virtual environments
 .venv/
-.env/
+env/
 
-# build / outputs
+# data outputs
 data/out/
+
+# generated reports
+reports/*
+!reports/screenshots/
+!reports/screenshots/dashboard.png
