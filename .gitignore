@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# virtual environments
+.venv/
+.env/
+
+# build / outputs
+data/out/
