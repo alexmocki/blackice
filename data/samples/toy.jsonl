@@ -1,0 +1,9 @@
+{"ts":"2025-12-17T21:00:00Z","user_id":"u1","event_type":"login_fail","src_ip":"1.1.1.1","user_agent":"UA1","resource":"/login","auth_method":"password","country":"US","device_id":"d1"}
+{"ts":"2025-12-17T21:00:05Z","user_id":"u1","event_type":"login_fail","src_ip":"1.1.1.1","user_agent":"UA1","resource":"/login","auth_method":"password","country":"US","device_id":"d1"}
+{"ts":"2025-12-17T21:00:10Z","user_id":"u1","event_type":"login_fail","src_ip":"1.1.1.1","user_agent":"UA1","resource":"/login","auth_method":"password","country":"US","device_id":"d1"}
+
+{"ts":"2025-12-17T21:10:00Z","user_id":"u2","event_type":"api_call","src_ip":"2.2.2.2","user_agent":"UA2","resource":"/api/v1/payments","auth_method":"token","token_id":"t-abc","country":"US","device_id":"d2"}
+{"ts":"2025-12-17T21:10:30Z","user_id":"u2","event_type":"api_call","src_ip":"3.3.3.3","user_agent":"UA3","resource":"/api/v1/payments","auth_method":"token","token_id":"t-abc","country":"FR","device_id":"d9"}
+
+{"ts":"2025-12-17T22:00:00Z","user_id":"u3","event_type":"api_call","src_ip":"4.4.4.4","user_agent":"UA4","resource":"/api/v1/profile","auth_method":"token","token_id":"t-u3","country":"US","device_id":"mac-1"}
+{"ts":"2025-12-17T22:20:00Z","user_id":"u3","event_type":"api_call","src_ip":"5.5.5.5","user_agent":"UA5","resource":"/api/v1/profile","auth_method":"token","token_id":"t-u3","country":"JP","device_id":"win-7"}
