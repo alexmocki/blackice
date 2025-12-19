@@ -28,7 +28,6 @@ def main() -> None:
         for r in reader:
             rows.append(r)
 
-    # Sort by (decision severity, ring_score, risk_score)
     sev = {"allow": 0, "mfa": 1, "block": 2}
     rows_sorted = sorted(
         rows,
@@ -40,13 +39,13 @@ def main() -> None:
         reverse=True,
     )
 
+    has_ring = bool(rows) and ("ring_score" in rows[0])
+
     lines: List[str] = []
     lines.append("# BLACKICE — Adversarial Evaluation Report\n\n")
-    lines.append("This report summarizes adversarial episodes and how decisions escalate using **risk scoring + fraud-ring evidence**.\n\n")
+    lines.append("Adversarial episodes evaluated with **risk scoring + fraud-ring evidence**.\n\n")
 
-    lines.append("## Results (top episodes)\n\n")
-    has_ring = "ring_score" in (rows[0].keys() if rows else [])
-
+    lines.append("## Results\n\n")
     if has_ring:
         lines.append("| ep | attacker_profile | risk | ring_id | ring_score | decision | ips | dev | cc |\n")
         lines.append("|---:|---|---:|---|---:|---|---:|---:|---:|\n")
@@ -68,10 +67,8 @@ def main() -> None:
             )
 
     lines.append("\n## Decision logic (public baseline)\n\n")
-    lines.append("- Decisions escalate using two signals:\n")
-    lines.append("  1) **Fraud ring evidence** (collective abuse via entity graph clustering)\n")
-    lines.append("  2) **Risk score** (per-episode behavioral features)\n\n")
-    lines.append("Ring escalation takes precedence over per-episode risk.\n\n")
+    lines.append("- Primary: **fraud-ring escalation** (collective abuse)\n")
+    lines.append("- Secondary: **risk-score thresholds** (per-episode behavior)\n\n")
 
     lines.append("## Why episodes escalated\n\n")
     for r in rows_sorted[:5]:

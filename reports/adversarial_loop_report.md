@@ -1,8 +1,8 @@
 # BLACKICE — Adversarial Evaluation Report
 
-This report summarizes adversarial episodes and how decisions escalate using **risk scoring + fraud-ring evidence**.
+Adversarial episodes evaluated with **risk scoring + fraud-ring evidence**.
 
-## Results (top episodes)
+## Results
 
 | ep | attacker_profile | risk | decision | ips | dev | cc |
 |---:|---|---:|---|---:|---:|---:|
@@ -14,11 +14,8 @@ This report summarizes adversarial episodes and how decisions escalate using **r
 
 ## Decision logic (public baseline)
 
-- Decisions escalate using two signals:
-  1) **Fraud ring evidence** (collective abuse via entity graph clustering)
-  2) **Risk score** (per-episode behavioral features)
-
-Ring escalation takes precedence over per-episode risk.
+- Primary: **fraud-ring escalation** (collective abuse)
+- Secondary: **risk-score thresholds** (per-episode behavior)
 
 ## Why episodes escalated
 
