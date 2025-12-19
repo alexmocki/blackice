@@ -1,15 +1,24 @@
 # Python
 __pycache__/
 *.pyc
-.venv/
-env/
+*.pyo
 
-# data outputs
-data/out/
+# Data artifacts
+data/samples/*.jsonl
+data/out/*.jsonl
 
-# generated reports
-reports/*
-!reports/screenshots/
-!reports/screenshots/dashboard.png
-c
+# Reports (keep markdown, ignore generated CSV if desired)
+reports/*.csv
+
+# OS
+.DS_Store
+
+# Generated reports / graphs
+reports/*.html
+reports/*.dot
+
+# Scratch / experiments
+main
+src/
+
 
