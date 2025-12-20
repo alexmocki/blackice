@@ -79,7 +79,8 @@ def build_leaderboard(
     rows: List[LeaderRow] = []
 
     for i, obj in enumerate(runs, start=1):
-        events = int(obj.get("events", obj.get("total_events", 0)) or 0)        impact = _num(obj.get("impact", 0.0))
+        events = int(obj.get("events", obj.get("total_events", 0)) or 0)
+        impact = _num(obj.get("impact", 0.0))
         bad_rules = obj.get("bad_rules", {})
         det = _count_detections(bad_rules)
 
