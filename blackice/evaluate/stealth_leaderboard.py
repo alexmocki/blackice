@@ -21,6 +21,7 @@ class LeaderRow:
     impact: float
     stealth: float
     total: float
+    det_w: float
     bad_rules: Union[Dict[str, int], List[str], str] = field(default_factory=dict)
 
 
@@ -64,6 +65,35 @@ def _count_detections(bad: Any) -> int:
 
 
 
+
+
+RULE_WEIGHTS = {
+    "RULE_TOKEN_REUSE_MULTI_DEVICE": 2.0,
+    "RULE_TOKEN_REUSE_MULTI_COUNTRY": 2.0,
+    "RULE_STUFFING_BURST_IP": 1.5,
+    "RULE_STUFFING_BURST_USER": 1.5,
+    "RULE_IMPOSSIBLE_TRAVEL": 1.0,
+}
+
+def _det_weighted(bad: Any) -> float:
+    if isinstance(bad, dict):
+        s = 0.0
+        for k, v in bad.items():
+            w = float(RULE_WEIGHTS.get(str(k), 1.0))
+            try:
+                s += w * float(v)
+            except Exception:
+                s += w
+        return s
+    if isinstance(bad, (list, set, tuple)):
+        s = 0.0
+        for k in bad:
+            s += float(RULE_WEIGHTS.get(str(k), 1.0))
+        return s
+    if bad:
+        return 1.0
+    return 0.0
+
 def build_leaderboard(
     runs: List[Dict[str, Any]],
     max_steps: int = 3600,
@@ -82,13 +112,14 @@ def build_leaderboard(
         events = int(obj.get("events", obj.get("total_events", 0)) or 0)
         impact = _num(obj.get("impact", 0.0))
         bad_rules = obj.get("bad_rules", {})
+        det_w = _det_weighted(bad_rules)
         det = _count_detections(bad_rules)
 
         impact_cap = 1.0
         impact_n = _clamp(impact / impact_cap)
         stealth_n = 1.0 / (1.0 + float(det))
         cost_n = _clamp(float(int(obj.get("step_s", 0) or 0)) / float(max_steps))
-        eff_n = 1.0 - cost_n
+        eff_n = (1.0 - cost_n) ** 2
 
         base = 0.55 * impact_n + 0.35 * stealth_n + 0.10 * eff_n
         total = base * (0.90 ** float(det))
@@ -105,6 +136,7 @@ def build_leaderboard(
                 impact=impact,
                 stealth=stealth,
                 total=total,
+                det_w=det_w,
                 bad_rules=obj.get("bad_rules", {}),
             )
         )
@@ -146,36 +178,45 @@ def write_md(rows: List[LeaderRow], path: Path, limit: int = 25) -> None:
         "impact",
         "stealth",
         "total",
+        "score_100",
+        "det_w",
         "bad_rules",
     ]
 
-    lines.append("| " + " | ".join(cols) + " |")
-    lines.append("|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|---|")
 
-    for r in rows[:limit]:
-        bad = r.bad_rules
-        if isinstance(bad, dict):
-            top = sorted(bad.items(), key=lambda x: x[1], reverse=True)[:3]
-            bad_s = ", ".join([f"{k}:{v}" for k, v in top])
-        elif isinstance(bad, (list, set, tuple)):
-            bad_s = ", ".join(map(str, bad))
-        else:
-            bad_s = str(bad)
+    def _md_table(title: str, rows_in: List[LeaderRow]) -> None:
+        lines.append(f"## {title}\n")
+        lines.append("| " + " | ".join(cols) + " |")
+        lines.append("|" + "|".join(["---:" ] + [":---:" ]*3 + ["---:" ]*7 + ["---:" ] + ["---:" ] + ["---"] ) + "|")
+        for r in rows_in:
+            bad = r.bad_rules
+            if isinstance(bad, dict):
+                top = sorted(bad.items(), key=lambda x: x[1], reverse=True)[:3]
+                bad_s = ", ".join([f"{k}:{v}" for k, v in top])
+            elif isinstance(bad, (list, set, tuple)):
+                bad_s = ", ".join(map(str, bad))
+            else:
+                bad_s = str(bad)
 
-        vals: List[Any] = []
-        vals.append(r.rank)
-        vals.append(r.same_country)
-        vals.append(r.device_hop)
-        vals.append(r.country_hop)
-        vals.append(r.step_s)
-        vals.append(r.runs)
-        vals.append(r.events)
-        vals.append(f"{r.impact:.2f}")
-        vals.append(f"{r.stealth:.2f}")
-        vals.append(f"{r.total:.2f}")
-        vals.append(bad_s)
-
-        lines.append("| " + " | ".join(map(str, vals)) + " |")
+            vals: List[Any] = []
+            vals.append(r.rank)
+            vals.append(r.same_country)
+            vals.append(r.device_hop)
+            vals.append(r.country_hop)
+            vals.append(r.step_s)
+            vals.append(r.runs)
+            vals.append(r.events)
+            vals.append(f"{r.impact:.2f}")
+            vals.append(f"{r.stealth:.3f}")
+            vals.append(f"{r.total:.3f}")
+            vals.append(f"{(r.total*100.0):.1f}")
+            vals.append(f"{r.det_w:.2f}")
+            vals.append(bad_s)
+            lines.append("| " + " | ".join(map(str, vals)) + " |")
+        lines.append("")
+    _md_table("Overall", rows[:limit])
+    _md_table("High impact (impact >= 1.6)", [r for r in rows if r.impact >= 1.6][:limit])
+    _md_table("Stealth-challenged (det_w > 0)", [r for r in rows if r.det_w > 0.0][:limit])
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
