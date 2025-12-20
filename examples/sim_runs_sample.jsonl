@@ -1,0 +1,1 @@
+{"same_country": true, "device_hop": false, "country_hop": false, "step_s": 300, "events": 6, "impact": 1.0, "bad_rules": ["RULE_TOKEN_REUSE_MULTI_DEVICE"]}
