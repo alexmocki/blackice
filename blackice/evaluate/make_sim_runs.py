@@ -19,7 +19,7 @@ RULES: List[str] = [
 
 def sample_bad_rules(rng: random.Random) -> List[str]:
     # 0..3 detections with skew toward small numbers
-    k = rng.choices([0, 1, 2, 3], weights=[55, 28, 12, 5], k=1)[0]
+    k = rng.choices([0, 1, 2, 3], weights=[20, 35, 25, 20], k=1)[0]
     if k == 0:
         return []
     return rng.sample(RULES, k=min(k, len(RULES)))
