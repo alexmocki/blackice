@@ -214,7 +214,27 @@ def write_md(rows: List[LeaderRow], path: Path, limit: int = 25) -> None:
             vals.append(bad_s)
             lines.append("| " + " | ".join(map(str, vals)) + " |")
         lines.append("")
+
+    def _pareto(cands: List[LeaderRow]) -> List[LeaderRow]:
+        # Maximize impact, maximize stealth, minimize step_s
+        out: List[LeaderRow] = []
+        for a in cands:
+            dominated = False
+            for b in cands:
+                if b is a:
+                    continue
+                # b dominates a if b is >= on impact/stealth and <= on step_s, and strictly better on at least one
+                if (b.impact >= a.impact and b.stealth >= a.stealth and b.step_s <= a.step_s):
+                    if (b.impact > a.impact or b.stealth > a.stealth or b.step_s < a.step_s):
+                        dominated = True
+                        break
+            if not dominated:
+                out.append(a)
+        # Keep stable ordering by total desc, then impact desc
+        out.sort(key=lambda r: (r.total, r.impact, -r.step_s), reverse=True)
+        return out
     _md_table("Overall", rows[:limit])
+    _md_table("Pareto frontier (impact ↑, stealth ↑, steps ↓)", _pareto(rows)[:limit])
     _md_table("Top Clean Stealth (det_w == 0)", [r for r in rows if r.det_w == 0.0][:limit])
     _md_table("High impact (impact >= 1.6)", [r for r in rows if r.impact >= 1.6][:limit])
     _md_table("Top Risky Impact (impact >= 1.6 & det_w > 0)", [r for r in rows if (r.impact >= 1.6 and r.det_w > 0.0)][:limit])
