@@ -57,8 +57,17 @@ def build_leaderboard(
     for i, obj in enumerate(runs, start=1):
         events = int(obj.get("events", obj.get("total_events", 0)) or 0)
         impact = _num(obj.get("impact", 0.0))
-        stealth = _num(obj.get("stealth", 0.0))
-        total = w_impact * impact + w_stealth * stealth
+        
+        bad_val = obj.get("bad_rules", {})
+        if isinstance(bad_val, dict):
+            det = sum(int(v) for v in bad_val.values())
+        elif isinstance(bad_val, (list, set, tuple)):
+            det = len(bad_val)
+        else:
+            det = 0
+        # If stealth not provided, derive from detections (higher det => lower stealth)
+        stealth = _num(obj.get("stealth", 1.0 / (1.0 + float(det))))
+total = w_impact * impact + w_stealth * stealth
 
         rows.append(
             LeaderRow(
