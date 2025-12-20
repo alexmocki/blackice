@@ -215,9 +215,10 @@ def write_md(rows: List[LeaderRow], path: Path, limit: int = 25) -> None:
             lines.append("| " + " | ".join(map(str, vals)) + " |")
         lines.append("")
     _md_table("Overall", rows[:limit])
+    _md_table("Top Clean Stealth (det_w == 0)", [r for r in rows if r.det_w == 0.0][:limit])
     _md_table("High impact (impact >= 1.6)", [r for r in rows if r.impact >= 1.6][:limit])
+    _md_table("Top Risky Impact (impact >= 1.6 & det_w > 0)", [r for r in rows if (r.impact >= 1.6 and r.det_w > 0.0)][:limit])
     _md_table("Stealth-challenged (det_w > 0)", [r for r in rows if r.det_w > 0.0][:limit])
-
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
