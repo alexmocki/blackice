@@ -39,6 +39,30 @@ def _num(x: Any, default: float = 0.0) -> float:
     except Exception:
         return float(default)
 
+def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
+
+
+def _count_detections(bad: Any) -> int:
+    if isinstance(bad, dict):
+        s = 0
+        for v in bad.values():
+            try:
+                s += int(v)
+            except Exception:
+                s += 1
+        return s
+    if isinstance(bad, (list, set, tuple)):
+        return len(bad)
+    if bad:
+        return 1
+    return 0
+
+
 
 def build_leaderboard(
     runs: List[Dict[str, Any]],
@@ -55,20 +79,19 @@ def build_leaderboard(
     rows: List[LeaderRow] = []
 
     for i, obj in enumerate(runs, start=1):
-        events = int(obj.get("events", obj.get("total_events", 0)) or 0)
-        impact = _num(obj.get("impact", 0.0))
-        
-        bad_val = obj.get("bad_rules", {})
-        if isinstance(bad_val, dict):
-            det = sum(int(v) for v in bad_val.values())
-        elif isinstance(bad_val, (list, set, tuple)):
-            det = len(bad_val)
-        else:
-            det = 0
-        # If stealth not provided, derive from detections (higher det => lower stealth)
-        stealth = _num(obj.get("stealth", 1.0 / (1.0 + float(det))))
-total = w_impact * impact + w_stealth * stealth
+        events = int(obj.get("events", obj.get("total_events", 0)) or 0)        impact = _num(obj.get("impact", 0.0))
+        bad_rules = obj.get("bad_rules", {})
+        det = _count_detections(bad_rules)
 
+        impact_cap = 1.0
+        impact_n = _clamp(impact / impact_cap)
+        stealth_n = 1.0 / (1.0 + float(det))
+        cost_n = _clamp(float(int(obj.get("step_s", 0) or 0)) / float(max_steps))
+        eff_n = 1.0 - cost_n
+
+        base = 0.55 * impact_n + 0.35 * stealth_n + 0.10 * eff_n
+        total = base * (0.90 ** float(det))
+        stealth = stealth_n
         rows.append(
             LeaderRow(
                 rank=0,  # set later
