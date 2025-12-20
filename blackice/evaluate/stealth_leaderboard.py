@@ -231,7 +231,7 @@ def write_md(rows: List[LeaderRow], path: Path, limit: int = 25) -> None:
             if not dominated:
                 out.append(a)
         # Keep stable ordering by total desc, then impact desc
-        out.sort(key=lambda r: (r.total, r.impact, -r.step_s), reverse=True)
+        out.sort(key=lambda r: (r.impact, r.stealth, -r.step_s), reverse=True)
         return out
     _md_table("Overall", rows[:limit])
     _md_table("Pareto frontier (impact ↑, stealth ↑, steps ↓)", _pareto(rows)[:limit])
