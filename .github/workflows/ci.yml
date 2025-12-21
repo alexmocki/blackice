@@ -1,13 +1,12 @@
-name: ci
+name: CI
 
 on:
   push:
   pull_request:
 
 jobs:
-  test-cli:
+  smoke:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -15,36 +14,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install (editable)
+      - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          python -m pip install -e .
 
-      - name: Lint (compile only)
+      - name: Smoke test
         run: |
-          python -m py_compile blackice/cli/main.py
-          python -m py_compile blackice/simulator/cli.py
-          python -m py_compile blackice/detections/engine.py
-          python -m py_compile blackice/cli/validate.py
-
-      - name: Run CLI (warn must pass)
-        run: |
-          python -m blackice run \
-            --input data/samples/toy.jsonl \
-            --outdir data/out \
-            --audit-mode warn
-
-      - name: Run CLI (strict must fail if changed)
-        run: |
-          set +e
-          python -m blackice run \
-            --input data/samples/toy.jsonl \
-            --outdir data/out2 \
-            --audit-mode strict
-          code=$?
-          echo "exit_code=$code"
-          if [ "$code" -eq 0 ]; then
-            echo "Expected strict mode to fail (non-zero) when normalization changes output"
-            exit 1
-          fi
-          exit 0
+          bash scripts/smoke.sh
