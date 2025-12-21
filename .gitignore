@@ -22,3 +22,10 @@ main
 src/
 
 
+
+# Generated outputs
+data/out/
+data/out2/
+data/**/reports/
+__pycache__/
+*.pyc
