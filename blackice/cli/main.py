@@ -51,7 +51,7 @@ import hashlib
 import json
 import os
 
-from blackice.simulator.cli import run_replay
+from blackice.cli.replay import run_replay
 from blackice.cli.score import score_alerts
 from blackice.cli.trust import apply_trust
 from blackice.cli.validate import normalize_decisions_jsonl
