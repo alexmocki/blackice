@@ -1,3 +1,9 @@
+🔗 **Links**
+- [CI Pipeline](https://github.com/alexmocki/blackice/actions)
+- [Quickstart](#quickstart)
+- [Adversarial Logic](#-explicit-adversarial-logic)
+- [Detection Capabilities](#-detection-capabilities-blue-team)
+
 ## ✨ What BlackIce Does
 
 **BlackIce models how modern security teams reason under adversarial pressure.**  
