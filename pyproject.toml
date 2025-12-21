@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackice"
+version = "0.1.0"
+description = "BlackIce — adversarial defense + detection simulation engine"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+# Главное: берем только blackice* и не пытаемся “угадывать” остальные директории
+include = ["blackice*"]
+exclude = ["tests*", "docs*", "data*", "reports*", "examples*"]
