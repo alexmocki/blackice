@@ -1,60 +1,74 @@
+import argparse
+import os
+import json
+import json
+from blackice.simulator.cli import run_replay
+from blackice.cli.score import score_alerts
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def normalize_with_audit(decisions_path: str, report_dir: str, tag: str) -> dict:
-    """Normalize decisions.jsonl and write an audit report if normalization changes the file (WARN mode)."""
-    dp = Path(decisions_path)
-    before = dp.read_bytes() if dp.exists() else b""
-    before_hash = _sha256_bytes(before)
+def normalize_with_audit(decisions_path: str, report_dir: str, tag: str, audit_mode: str = "warn") -> dict:
+    """
+    Normalize decisions.jsonl in place using blackice.cli.validate.normalize_decisions_jsonl,
+    and optionally write an audit report.
+
+    audit_mode:
+      - warn: write report only if changed
+      - always: always write report
+      - strict: if changed, write report and exit non-zero
+    """
+    import json, os
+    from datetime import datetime, timezone
+    from blackice.cli.validate import normalize_decisions_jsonl
+
+    os.makedirs(os.path.dirname(decisions_path) or ".", exist_ok=True)
+    os.makedirs(report_dir, exist_ok=True)
 
     tmp = decisions_path + ".norm"
+
+    def _read_bytes(path: str) -> bytes:
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except FileNotFoundError:
+            return b""
+
+    before = _read_bytes(decisions_path)
+
     total, written = normalize_decisions_jsonl(decisions_path, tmp)
+
+    after = _read_bytes(tmp)
+
+    changed = before != after
+
+    # Replace original with normalized output (always), so downstream sees normalized schema
     os.replace(tmp, decisions_path)
-
-    after = dp.read_bytes() if dp.exists() else b""
-    after_hash = _sha256_bytes(after)
-
-    changed = before_hash != after_hash
 
     report = {
         "tag": tag,
-        "decisions_path": str(dp),
-        "total_lines": total,
-        "written_lines": written,
+        "decisions_path": decisions_path,
         "changed": changed,
-        "sha256_before": before_hash,
-        "sha256_after": after_hash,
+        "total": total,
+        "written": written,
         "bytes_before": len(before),
         "bytes_after": len(after),
         "ts_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "audit_mode": audit_mode,
     }
 
-    if changed:
-        rdir = Path(report_dir)
-        rdir.mkdir(parents=True, exist_ok=True)
-        # keep latest + timestamped copy
-        (rdir / f"decision_normalization_{tag}.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-        (rdir / f"decision_normalization_{tag}_{report['ts_utc'].replace(':','').replace('-','')}.json").write_text(
-            json.dumps(report, indent=2), encoding="utf-8"
-        )
-        print("[WARN] decisions normalization changed output; report written to", str(rdir))
+    if changed or audit_mode == "always":
+        report_path = os.path.join(report_dir, f"normalize_{tag}.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"[audit] normalization report -> {report_path}")
+
+    if audit_mode == "strict" and changed:
+        raise SystemExit("Decision normalization changed output (strict mode)")
 
     return report
 
-
-import argparse
-from datetime import datetime, timezone
-from pathlib import Path
-import hashlib
-import json
-import os
-
-from blackice.cli.replay import run_replay
-from blackice.cli.score import score_alerts
-from blackice.cli.trust import apply_trust
-from blackice.cli.validate import normalize_decisions_jsonl
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     # run
     prun = sub.add_parser("run", help="Run full pipeline: events -> alerts -> decisions -> trust")
     prun.add_argument("--input", required=True, help="Path to input JSONL events")
+    prun.add_argument("--audit-mode", choices=["warn","always","strict"], default="warn", help="Decision normalization audit policy")
     prun.add_argument("--outdir", required=True, help="Output directory")
 
     return p
@@ -95,13 +110,12 @@ def main(argv=None) -> int:
     if args.command == "score":
         summary = score_alerts(args.input, args.output)
         # normalize decisions (WARN gate: audit if changed)
-        norm_report = normalize_with_audit(args.output, os.path.join(os.path.dirname(args.output) or '.', 'reports'), tag='score')
+        norm_report = normalize_with_audit(args.output, os.path.join(os.path.dirname(args.output) or '.', 'reports'), tag='score', audit_mode=args.audit_mode)
         summary["normalized"] = norm_report
         print(json.dumps(summary, indent=2))
         return 0
 
     if args.command == "trust":
-        summary = apply_trust(args.input, args.output)
         print(json.dumps(summary, indent=2))
         return 0
 
@@ -114,9 +128,10 @@ def main(argv=None) -> int:
         replay_summary = run_replay(args.input, alerts_path)
         score_summary = score_alerts(alerts_path, decisions_path)
         # normalize decisions right after scoring (WARN gate: audit if changed)
-        norm_report = normalize_with_audit(decisions_path, os.path.join(args.outdir, 'reports'), tag='run')
+        norm_report = (os.path.exists(decisions_path) and normalize_with_audit(decisions_path, os.path.join(args.outdir, 'reports'), tag='run', audit_mode=args.audit_mode))
 
-        trust_summary = apply_trust(decisions_path, trust_path)
+        trust_summary = {"enabled": False, "reason": "trust stage not wired yet"}
+
 
         summary = {
             "events_in": args.input,
