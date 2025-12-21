@@ -35,4 +35,16 @@ jobs:
             --audit-mode warn
 
       - name: Run CLI (strict must fail if changed)
-        run:
+        run: |
+          set +e
+          python -m blackice run \
+            --input data/samples/toy.jsonl \
+            --outdir data/out2 \
+            --audit-mode strict
+          code=$?
+          echo "exit_code=$code"
+          if [ "$code" -eq 0 ]; then
+            echo "Expected strict mode to fail (non-zero) when normalization changes output"
+            exit 1
+          fi
+          exit 0
