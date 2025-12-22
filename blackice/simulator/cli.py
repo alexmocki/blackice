@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, Iterable, List
+
+from blackice.trust.writer import TrustWriter
 
 
 def _iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
@@ -23,6 +26,16 @@ def run_replay(input_path: str, output_path: str) -> Dict[str, Any]:
     with open(output_path, "w", encoding="utf-8") as f:
         for a in alerts:
             f.write(json.dumps(a, ensure_ascii=False) + "\n")
+
+    out_path = Path(output_path)
+    outdir = out_path if out_path.is_dir() else out_path.parent
+    trust_path = outdir / "trust.jsonl"
+
+    trust_rows = result.get("trust_rows", [])
+    with TrustWriter(trust_path) as tw:
+        for row in trust_rows:
+            tw.write(row)
+
 
     summary = {
         "events": len(events),

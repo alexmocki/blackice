@@ -65,6 +65,53 @@ def _instantiate_rule(cls: type) -> Tuple[Any | None, str | None]:
         except Exception as e2:
             return None, f"cannot instantiate: {e2!r} (signature err: {e!r})"
 
+def _build_trust_rows(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    MVP Trust Ledger.
+    Trust starts at 1.0 per user and decays per alert.
+    One row per alert = evidence-grade audit trail.
+    """
+    trust: Dict[Any, float] = {}
+    rows: List[Dict[str, Any]] = []
+    step = 0
+
+    for a in alerts:
+        step += 1
+
+        user_id = (
+            a.get("user_id")
+            or a.get("user")
+            or a.get("account_id")
+            or a.get("subject")
+        )
+        if user_id is None:
+            continue
+
+        before = trust.get(user_id, 1.0)
+
+        penalty = 0.05
+        after = max(0.0, before - penalty)
+        trust[user_id] = after
+
+        rows.append({
+            "ts": a.get("ts") or a.get("timestamp"),
+            "step": step,
+            "user_id": user_id,
+            "trust_before": before,
+            "trust_after": after,
+            "delta": after - before,
+            "reason": [a.get("rule_id")],
+            "severity": a.get("severity"),
+            "evidence": {
+                "ip": a.get("ip"),
+                "country": a.get("country"),
+                "device_id": a.get("device_id"),
+                "token_id": a.get("token_id"),
+            },
+        })
+
+    return rows
+
 
 def detect(events: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -109,10 +156,14 @@ def detect(events: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                 ad.setdefault("rule_id", rname)
                 alerts_out.append(ad)
 
-    return {
+        result = {
         "alerts": alerts_out,
         "rules_loaded": len(rules),
         "rules_discovered": len(rule_classes),
         "rules_skipped": skipped,
         "rule_hits": hits,
     }
+
+    result["trust_rows"] = _build_trust_rows(alerts_out)
+    return result
+
