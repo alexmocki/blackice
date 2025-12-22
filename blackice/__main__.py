@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from blackice.cli.main import main
 
 if __name__ == "__main__":
