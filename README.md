@@ -149,3 +149,26 @@ Most security demos answer:
 
 BlackIce answers:
 > “How does detection behave when the attacker actively adapts?”
+P
+---
+
+## 🔍 Impossible Travel Detection (with Cooldown)
+
+BlackIce detects **impossible travel** scenarios — cases where the same user authenticates from different countries within an unrealistically short time window.
+
+### How it works
+For each user, BlackIce:
+1. Tracks the **last seen event** (timestamp, country, device, IP)
+2. Compares the current event against the previous one
+3. Emits a `RULE_IMPOSSIBLE_TRAVEL` alert if:
+   - Countries differ
+   - Time delta ≤ travel window
+4. Applies **cooldown-based deduplication** to prevent alert spam
+
+### Cooldown (Anti-Spam)
+- One impossible travel alert per user within a cooldown window
+- Default cooldown: **300 seconds**
+- Cooldown is tracked per user (stateful)
+
+Example:
+
