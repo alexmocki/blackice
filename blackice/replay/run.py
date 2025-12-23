@@ -91,6 +91,13 @@ def _get_user(obj: Dict[str, Any]) -> str:
 
 
 def _get_ip(obj: Dict[str, Any]) -> str:
+    return str(obj.get('ip') or obj.get('ip_address') or obj.get('src_ip') or obj.get('source_ip') or 'unknown')
+
+
+def _get_country(obj: Dict[str, Any]) -> str:
+    return str(obj.get('country') or obj.get('geo_country') or obj.get('cc') or 'unknown')
+
+
     return str(obj.get("ip") or obj.get("ip_address") or obj.get("src_ip") or obj.get("source_ip") or "unknown")
 
 
@@ -103,6 +110,8 @@ class BurstConf:
     window_s: float = 60.0
     user_fail_threshold: int = 3
     ip_fail_threshold: int = 3
+    # Impossible travel
+    travel_window_s: float = 3600.0  # 1 hour
 
 
 def _push_window(q: Deque[Tuple[float, Dict[str, Any]]], ts: float, ev: Dict[str, Any], window_s: float) -> None:
@@ -111,6 +120,31 @@ def _push_window(q: Deque[Tuple[float, Dict[str, Any]]], ts: float, ev: Dict[str
     while q and q[0][0] < cutoff:
         q.popleft()
 
+
+
+def _make_travel_alert(user_id: str, ts: float, prev: Dict[str, Any], cur: Dict[str, Any]) -> Dict[str, Any]:
+    prev_country = prev.get("country", "unknown")
+    cur_country = cur.get("country", "unknown")
+    prev_ts = _parse_ts(prev.get("ts") or prev.get("timestamp") or prev.get("time")) or ts
+    dt = max(1.0, ts - prev_ts)
+
+    alert_id = f"RULE_IMPOSSIBLE_TRAVEL:{user_id}:{int(ts)}"
+    return {
+        "alert_id": alert_id,
+        "rule_id": "RULE_IMPOSSIBLE_TRAVEL",
+        "user_id": user_id,
+        "severity": 9,
+        "ts": ts,
+        "key": user_id,
+        "evidence": {
+            "prev": prev,
+            "cur": cur,
+            "prev_country": prev_country,
+            "cur_country": cur_country,
+            "dt_seconds": dt,
+            "note": "Same user observed in different countries within a short time window.",
+        },
+    }
 
 def _make_alert(rule_id: str, key: str, ts: float, events: Deque[Tuple[float, Dict[str, Any]]]) -> Dict[str, Any]:
     # compact evidence: show last few events only
@@ -154,6 +188,8 @@ def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
 
     user_q: Dict[str, Deque[Tuple[float, Dict[str, Any]]]] = defaultdict(deque)
     ip_q: Dict[str, Deque[Tuple[float, Dict[str, Any]]]] = defaultdict(deque)
+    # For impossible travel
+    last_event_by_user: Dict[str, Dict[str, Any]] = {}
 
     # de-dupe: avoid emitting same alert repeatedly each event
     last_emit_user: Dict[str, float] = {}
@@ -178,14 +214,41 @@ def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
             if ts is None:
                 # if no ts, we can't window correctly -> skip
                 continue
+            failed = _is_failed_auth(obj)
 
-            if not _is_failed_auth(obj):
+            # ----------------------------
+            # Impossible travel (all events)
+            # ----------------------------
+            user = _get_user(obj)
+            country = _get_country(obj)
+            prev = last_event_by_user.get(user)
+            if user != "unknown" and prev is not None:
+                prev_country = _get_country(prev)
+                prev_ts = _parse_ts(prev.get("ts") or prev.get("timestamp") or prev.get("time"))
+                if (
+                    prev_ts is not None
+                    and country != "unknown"
+                    and prev_country != "unknown"
+                    and country != prev_country
+                    and (ts - prev_ts) <= conf.travel_window_s
+                ):
+                    alert = _make_travel_alert(user, ts, prev, obj)
+                    f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
+                    n_alerts += 1
+
+            # record current for ALL events (success + fail)
+            if user != "unknown":
+                last_event_by_user[user] = obj
+
+
+            # ----------------------------
+            # Stuffing burst (failed auth only)
+            # ----------------------------
+            if not failed:
                 continue
 
             n_failed += 1
-            user = _get_user(obj)
             ip = _get_ip(obj)
-
             # Update sliding windows
             _push_window(user_q[user], ts, obj, conf.window_s)
             _push_window(ip_q[ip], ts, obj, conf.window_s)
