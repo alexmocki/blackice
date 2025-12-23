@@ -148,30 +148,6 @@ def _make_travel_alert(user_id: str, ts: float, prev: Dict[str, Any], cur: Dict[
         },
     }
 
-def _make_alert(rule_id: str, key: str, ts: float, events: Deque[Tuple[float, Dict[str, Any]]]) -> Dict[str, Any]:
-    # compact evidence: show last few events only
-    tail = list(events)[-5:]
-    evidence_tail = [e for _, e in tail]
-
-    alert_id = f"{rule_id}:{key}:{int(ts)}"
-    user_id = "unknown"
-    if rule_id.endswith("_USER"):
-        user_id = key
-
-    return {
-        "alert_id": alert_id,
-        "rule_id": rule_id,
-        "user_id": user_id,
-        "severity": 7 if "USER" in rule_id else 8,
-        "ts": ts,
-        "key": key,
-        "evidence": {
-            "count_in_window": len(events),
-            "window_s": 60,
-            "tail": evidence_tail,
-        },
-    }
-
 
 def run_replay(input_path: str, alerts_path: str, rules: str | None = None) -> Dict[str, Any]:
     enabled = parse_rules(rules)
