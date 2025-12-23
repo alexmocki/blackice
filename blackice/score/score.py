@@ -2,11 +2,36 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
+
+def _infer_user_id_from_alert(alert: dict) -> Optional[str]:
+    uid = alert.get("user_id")
+    if uid and uid != "unknown":
+        return uid
+
+    ev = alert.get("evidence") or {}
+
+    # stuffing burst: evidence["events"] = [[ts, event], ...]
+    events = ev.get("events")
+    if isinstance(events, list) and events:
+        try:
+            e0 = events[0][1]
+            if isinstance(e0, dict) and e0.get("user_id"):
+                return e0["user_id"]
+        except Exception:
+            pass
+
+    # rules with prev/cur objects
+    for k in ("prev", "cur"):
+        obj = ev.get(k)
+        if isinstance(obj, dict) and obj.get("user_id"):
+            return obj["user_id"]
+
+    return None
 
 
 def _normalize_decision(decision: str) -> str:
-    # canonical decisions for now
     decision = (decision or "").lower().strip()
     if decision in {"allow", "deny", "stepup", "review"}:
         return decision
@@ -28,7 +53,6 @@ def score_alerts(alerts_path: str, decisions_path: str, audit_mode: str = "warn"
     normalized = 0
 
     def decide(severity: int) -> str:
-        # simple policy (tune later)
         if severity >= 8:
             return "deny"
         if severity >= 5:
@@ -43,6 +67,7 @@ def score_alerts(alerts_path: str, decisions_path: str, audit_mode: str = "warn"
             if not line:
                 continue
             n_in += 1
+
             try:
                 a = json.loads(line)
             except Exception:
@@ -59,18 +84,20 @@ def score_alerts(alerts_path: str, decisions_path: str, audit_mode: str = "warn"
             if decision != raw_decision:
                 normalized += 1
 
-            # risk score 0..100
             risk = max(0, min(100, sev_i * 12))
+
+            uid = _infer_user_id_from_alert(a) or a.get("user_id") or "unknown"
 
             d = {
                 "alert_id": a.get("alert_id"),
-                "user_id": a.get("user_id", "unknown"),
+                "user_id": uid,
                 "rule_id": a.get("rule_id", "RULE_UNKNOWN"),
                 "severity": sev_i,
                 "risk": risk,
                 "decision": decision,
                 "evidence": a.get("evidence", {}),
             }
+
             f_out.write(json.dumps(d, ensure_ascii=False) + "\n")
             n_out += 1
 
