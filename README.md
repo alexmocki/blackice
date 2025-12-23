@@ -1,3 +1,15 @@
+
+## Killer Demo (60 seconds)
+
+Run the end-to-end pipeline (replay → decisions → trust ledger):
+
+```bash
+python3 -m blackice run \
+  --input data/samples/toy.jsonl \
+  --outdir demo/out \
+  --audit-mode warn
+
+
 🔗 **Links**
 - [CI Pipeline](https://github.com/alexmocki/blackice/actions)
 - [Quickstart](#quickstart)
