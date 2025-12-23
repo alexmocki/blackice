@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, Optional, Tuple
+from blackice.alerts.schema import make_alert
+from blackice.replay.rules import parse_rules
 
 
 # ----------------------------
@@ -171,7 +173,8 @@ def _make_alert(rule_id: str, key: str, ts: float, events: Deque[Tuple[float, Di
     }
 
 
-def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
+def run_replay(input_path: str, alerts_path: str, rules: str | None = None) -> Dict[str, Any]:
+    enabled = parse_rules(rules)
     """
     Replay now runs a REAL behavioral detector:
       - Credential stuffing bursts (failed auth attempts) by USER and by IP
@@ -220,27 +223,28 @@ def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
             # ----------------------------
             # Impossible travel (all events)
             # ----------------------------
-            user = _get_user(obj)
-            country = _get_country(obj)
-            prev = last_event_by_user.get(user)
-            if user != "unknown" and prev is not None:
-                prev_country = _get_country(prev)
-                prev_ts = _parse_ts(prev.get("ts") or prev.get("timestamp") or prev.get("time"))
-                if (
-                    prev_ts is not None
-                    and country != "unknown"
-                    and prev_country != "unknown"
-                    and country != prev_country
-                    and (ts - prev_ts) <= conf.travel_window_s
-                ):
-                    # travel dedupe/cooldown per user
-                    cooldown_s = getattr(conf, "travel_cooldown_s", 300.0)
-                    prev_emit = last_emit_travel.get(user)
-                    if prev_emit is None or (ts - prev_emit) >= cooldown_s:
-                        alert = _make_travel_alert(user, ts, prev, obj)
-                        f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
-                        n_alerts += 1
-                        last_emit_travel[user] = ts
+            if "travel" in enabled:
+                            user = _get_user(obj)
+                            country = _get_country(obj)
+                            prev = last_event_by_user.get(user)
+                            if user != "unknown" and prev is not None:
+                                prev_country = _get_country(prev)
+                                prev_ts = _parse_ts(prev.get("ts") or prev.get("timestamp") or prev.get("time"))
+                                if (
+                                    prev_ts is not None
+                                    and country != "unknown"
+                                    and prev_country != "unknown"
+                                    and country != prev_country
+                                    and (ts - prev_ts) <= conf.travel_window_s
+                                ):
+                                    # travel dedupe/cooldown per user
+                                    cooldown_s = getattr(conf, "travel_cooldown_s", 300.0)
+                                    prev_emit = last_emit_travel.get(user)
+                                    if prev_emit is None or (ts - prev_emit) >= cooldown_s:
+                                        alert = _make_travel_alert(user, ts, prev, obj)
+                                        f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
+                                        n_alerts += 1
+                                        last_emit_travel[user] = ts
             # record current for ALL events (success + fail)
             if user != "unknown":
                 last_event_by_user[user] = obj
@@ -259,19 +263,19 @@ def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
             _push_window(ip_q[ip], ts, obj, conf.window_s)
 
             # USER burst
-            if user != "unknown" and len(user_q[user]) >= conf.user_fail_threshold:
+            if "stuffing_user" in enabled and user != "unknown" and len(user_q[user]) >= conf.user_fail_threshold:
                 prev = last_emit_user.get(user)
                 if prev is None or (ts - prev) >= conf.window_s:
-                    alert = _make_alert("RULE_STUFFING_BURST_USER", user, ts, user_q[user])
+                    alert = make_alert(rule_id="RULE_STUFFING_BURST_USER", ts=ts, key=user, severity=7, entity={"user_id": user}, evidence={"window_seconds": conf.window_s, "threshold": conf.user_fail_threshold, "events": list(user_q[user])}, tags=["auth","credential_stuffing"])
                     f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
                     n_alerts += 1
                     last_emit_user[user] = ts
 
             # IP burst
-            if ip != "unknown" and len(ip_q[ip]) >= conf.ip_fail_threshold:
+            if "stuffing_ip" in enabled and ip != "unknown" and len(ip_q[ip]) >= conf.ip_fail_threshold:
                 prev = last_emit_ip.get(ip)
                 if prev is None or (ts - prev) >= conf.window_s:
-                    alert = _make_alert("RULE_STUFFING_BURST_IP", ip, ts, ip_q[ip])
+                    alert = make_alert(rule_id="RULE_STUFFING_BURST_IP", ts=ts, key=ip, severity=7, entity={"src_ip": ip}, evidence={"window_seconds": conf.window_s, "threshold": conf.ip_fail_threshold, "events": list(ip_q[ip])}, tags=["auth","credential_stuffing"])
                     f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
                     n_alerts += 1
                     last_emit_ip[ip] = ts

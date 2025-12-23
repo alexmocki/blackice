@@ -39,3 +39,34 @@ def test_impossible_travel_emits_one():
 
 if __name__ == "__main__":
     test_impossible_travel_emits_one()
+
+def test_registry_travel_only():
+    from pathlib import Path
+    from blackice.replay.run import run_replay
+
+    tmp = Path("/tmp/blackice_registry_test")
+    tmp.mkdir(parents=True, exist_ok=True)
+
+    inp = tmp / "toy_registry.jsonl"
+    inp.write_text(
+        "\n".join([
+            '{"ts":"2025-12-17T21:00:00Z","user_id":"u1","event_type":"login_fail","src_ip":"1.1.1.1","country":"US","device_id":"d1"}',
+            '{"ts":"2025-12-17T21:00:01Z","user_id":"u1","event_type":"login_fail","src_ip":"1.1.1.1","country":"JP","device_id":"d1"}',
+            '{"ts":"2025-12-17T21:00:02Z","user_id":"u1","event_type":"login_fail","src_ip":"1.1.1.1","country":"JP","device_id":"d1"}',
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    out = tmp / "alerts.jsonl"
+    if out.exists():
+        out.unlink()
+
+    run_replay(str(inp), str(out), rules="travel")
+    lines = out.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1, f"expected 1 alert, got {len(lines)}"
+    assert "RULE_IMPOSSIBLE_TRAVEL" in lines[0]
+    print("OK: registry travel-only works")
+
+
+if __name__ == "__main__":
+    test_registry_travel_only()

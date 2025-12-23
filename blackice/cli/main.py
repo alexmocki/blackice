@@ -30,14 +30,14 @@ def _count_lines(path: str) -> Optional[int]:
 # Replace these imports once your real engine API is finalized.
 # ----------------------------
 
-def _engine_run_replay(input_path: str, alerts_path: str) -> None:
+def _engine_run_replay(input_path: str, alerts_path: str, rules: str | None = None) -> None:
     """
     Should produce alerts.jsonl from input events.jsonl (or sim_runs.jsonl etc.)
     """
     # Try your real function names if they exist
     try:
         from blackice.replay.run import run_replay  # type: ignore
-        run_replay(input_path, alerts_path)
+        run_replay(input_path, alerts_path, rules=rules)
         return
     except Exception:
         pass
@@ -74,7 +74,7 @@ def _engine_apply_trust(decisions_path: str, trust_path: str) -> None:
 # Pipeline + CLI commands
 # ----------------------------
 
-def run_pipeline(input_path: str, outdir: str, audit_mode: str = "warn") -> int:
+def run_pipeline(input_path: str, outdir: str, audit_mode: str = "warn", rules: str | None = None) -> int:
     out = Path(outdir)
     _ensure_dir(out)
 
@@ -85,7 +85,7 @@ def run_pipeline(input_path: str, outdir: str, audit_mode: str = "warn") -> int:
     _ensure_dir(Path(reports_dir))
 
     # stage 1: replay -> alerts
-    _engine_run_replay(input_path, alerts_path)
+    _engine_run_replay(input_path, alerts_path, rules=rules)
 
     # stage 2: score -> decisions (+ optional audit report)
     norm_report = _engine_score_alerts(alerts_path, decisions_path, audit_mode=audit_mode)
@@ -111,6 +111,8 @@ def run_pipeline(input_path: str, outdir: str, audit_mode: str = "warn") -> int:
         "audit_mode": audit_mode,
         "status": "ok",
     }
+
+    
 
     print(json.dumps(summary, indent=2))
     return 0
@@ -166,6 +168,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["off", "warn", "always", "strict"],
         help="Decision normalization audit policy",
     )
+    pr.add_argument(
+        "--rules",
+        default="all",
+        help="Comma-separated rules: all, travel, stuffing, stuffing_user, stuffing_ip",
+    )
 
     ps = sub.add_parser("score", help="Score alerts -> decisions.jsonl")
     ps.add_argument("--input", required=True, help="Path to input JSONL alerts")
@@ -192,7 +199,7 @@ def main() -> int:
     args = build_parser().parse_args()
 
     if args.command == "run":
-        return run_pipeline(args.input, args.outdir, audit_mode=args.audit_mode)
+        return run_pipeline(args.input, args.outdir, audit_mode=args.audit_mode, rules=args.rules)
 
     if args.command == "score":
         return score_alerts_cli(args.input, args.output, audit_mode=args.audit_mode)
