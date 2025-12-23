@@ -195,6 +195,7 @@ def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
     last_emit_user: Dict[str, float] = {}
     last_emit_ip: Dict[str, float] = {}
 
+    last_emit_travel: Dict[str, float] = {}
     n_in = 0
     n_failed = 0
     n_alerts = 0
@@ -232,10 +233,14 @@ def run_replay(input_path: str, alerts_path: str) -> Dict[str, Any]:
                     and country != prev_country
                     and (ts - prev_ts) <= conf.travel_window_s
                 ):
-                    alert = _make_travel_alert(user, ts, prev, obj)
-                    f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
-                    n_alerts += 1
-
+                    # travel dedupe/cooldown per user
+                    cooldown_s = getattr(conf, "travel_cooldown_s", 300.0)
+                    prev_emit = last_emit_travel.get(user)
+                    if prev_emit is None or (ts - prev_emit) >= cooldown_s:
+                        alert = _make_travel_alert(user, ts, prev, obj)
+                        f_out.write(json.dumps(alert, ensure_ascii=False) + "\n")
+                        n_alerts += 1
+                        last_emit_travel[user] = ts
             # record current for ALL events (success + fail)
             if user != "unknown":
                 last_event_by_user[user] = obj
