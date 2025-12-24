@@ -10,5 +10,8 @@ demo:
 		--outdir $(OUTDIR) \
 		--audit-mode warn
 
+proof:
+	sh scripts/proof.sh
+
 clean:
-	rm -rf $(OUTDIR)
+	rm -rf demo/out
