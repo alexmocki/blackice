@@ -184,3 +184,11 @@ For each user, BlackIce:
 
 Example:
 
+
+## Killer Proof
+
+```bash
+make proof
+```
+
+Produces: demo/out/{alerts,decisions,trust}.jsonl
