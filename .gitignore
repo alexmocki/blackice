@@ -32,3 +32,4 @@ __pycache__/
 *.bak.*
 demo/
 ssot_fix*.sh
+ssot_run.sh
