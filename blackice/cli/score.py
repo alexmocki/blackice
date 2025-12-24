@@ -1,49 +1,20 @@
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from collections import Counter, defaultdict
+from typing import Any, Dict, Iterable, Iterator, List, Tuple
 
 
-# Default rule weights (tune later)
-RULE_WEIGHTS: Dict[str, int] = {
-    "RULE_IMPOSSIBLE_TRAVEL": 60,
-    "RULE_TOKEN_REUSE_MULTI_COUNTRY": 45,
-    "RULE_TOKEN_REUSE_MULTI_DEVICE": 45,
-    "RULE_STUFFING_BURST_IP": 35,
-    "RULE_STUFFING_BURST_USER": 30,
-}
-
-
-def _parse_ts(ts: Optional[str]) -> Optional[datetime]:
-    if not ts:
-        return None
-    # Accept "Z"
-    if ts.endswith("Z"):
-        ts = ts[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(ts).astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
-def _read_jsonl(path: str) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    if not os.path.exists(path):
-        return out
+def _iter_jsonl(path: str) -> Iterator[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
-            out.append(json.loads(line))
-    return out
+            yield json.loads(line)
 
 
-def _write_jsonl(path: str, rows: Iterator[Dict[str, Any]]) -> int:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+def _write_jsonl(path: str, rows: Iterable[Dict[str, Any]]) -> int:
     n = 0
     with open(path, "w", encoding="utf-8") as f:
         for r in rows:
@@ -52,151 +23,168 @@ def _write_jsonl(path: str, rows: Iterator[Dict[str, Any]]) -> int:
     return n
 
 
-def _subject_from_alert(a: Dict[str, Any]) -> Tuple[str, str]:
-    # Preferred: explicit subject fields
-    st = a.get("subject_type")
-    sid = a.get("subject_id")
-    if st and sid:
+def _to_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        return float(x)
+    except Exception:
+        return default
+
+
+def _to_int(x: Any, default: int = 0) -> int:
+    try:
+        if x is None:
+            return default
+        return int(float(x))
+    except Exception:
+        return default
+
+
+def _norm_action(a: Any) -> str:
+    a = str(a or "ALLOW").upper()
+    if a in ("STEPUP", "STEP-UP"):
+        return "STEP_UP"
+    if a == "DENY":
+        return "BLOCK"
+    if a not in ("ALLOW", "STEP_UP", "BLOCK"):
+        return "ALLOW"
+    return a
+
+
+def _subject_from_alert(alert: Dict[str, Any]) -> Tuple[str, str]:
+    """
+    SSOT subject resolver for YOUR alert schema (see your alerts.jsonl preview).
+    """
+    st = alert.get("subject_type")
+    sid = alert.get("subject_id")
+    if st and sid and sid != "unknown":
         return str(st), str(sid)
 
-    # Fallback: derive from common fields / entity dict
-    ent = a.get("entity") if isinstance(a.get("entity"), dict) else {}
-    for st, key in (("user", "user_id"), ("ip", "ip"), ("session", "session_id"), ("token", "token_id")):
-        v = a.get(key) or ent.get(key)
-        if v:
-            return st, str(v)
+    rule_id = str(alert.get("rule_id") or "")
+    ent = alert.get("entity") or {}
+    if not isinstance(ent, dict):
+        ent = {}
 
-    # Last resort (keeps pipeline alive, but signals bad alert schema)
+    # prefer explicit ids
+    user_id = alert.get("user_id") or ent.get("user_id")
+    ip = alert.get("src_ip") or alert.get("ip") or ent.get("src_ip") or ent.get("ip")
+
+    # derive from rule_id
+    if "_IP" in rule_id or rule_id.endswith("IP"):
+        if ip:
+            return "ip", str(ip)
+        # your IP rule stores it in entity.src_ip
+        if ent.get("src_ip"):
+            return "ip", str(ent["src_ip"])
+
+    if "_USER" in rule_id or rule_id.endswith("USER") or "IMPOSSIBLE_TRAVEL" in rule_id:
+        if user_id:
+            return "user", str(user_id)
+        # your USER rule stores it in entity.user_id
+        if ent.get("user_id"):
+            return "user", str(ent["user_id"])
+
+    # fallback
+    if user_id:
+        return "user", str(user_id)
+    if ip:
+        return "ip", str(ip)
+
+    # last resort: use key if it exists
+    k = alert.get("key")
+    if k:
+        # guess: keys for your rules are user_id or ip string
+        if "_IP" in rule_id:
+            return "ip", str(k)
+        return "user", str(k)
+
     return "unknown", "unknown"
 
 
-def _evidence_row(a: Dict[str, Any]) -> Dict[str, Any]:
-    ent = a.get("entity") if isinstance(a.get("entity"), dict) else {}
-    ev = a.get("evidence") if isinstance(a.get("evidence"), dict) else {}
-
-    row = {
-        "ts": a.get("ts"),
-        "rule_id": a.get("rule_id"),
-        "severity": a.get("severity"),
-        "user_id": a.get("user_id") or ent.get("user_id"),
-        "session_id": a.get("session_id") or ent.get("session_id"),
-        "token_id": a.get("token_id") or ent.get("token_id"),
-        "ip": a.get("ip") or ent.get("ip") or ev.get("current_ip") or ev.get("src_ip"),
-        "country": a.get("country") or ent.get("country") or ev.get("current_country"),
-    }
-    return row
+def _risk_from_alert(alert: Dict[str, Any]) -> int:
+    # Your alerts often have severity, sometimes risk/risk_score
+    r = _to_float(alert.get("risk_score"), 0.0)
+    if r <= 0:
+        r = _to_float(alert.get("risk"), 0.0)
+    if r <= 0:
+        sev = _to_float(alert.get("severity"), 0.0)
+        # simple mapping: sev 0..10 -> 0..100
+        r = sev * 10.0
+    return max(0, min(100, int(round(r))))
 
 
-def _dedupe_evidence(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    seen = set()
-    out: List[Dict[str, Any]] = []
-    for r in rows:
-        key = (
-            r.get("ts"),
-            r.get("rule_id"),
-            r.get("user_id"),
-            r.get("session_id"),
-            r.get("token_id"),
-            r.get("ip"),
-            r.get("country"),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(r)
-    return out
-
-
-@dataclass
-class Agg:
-    subject_type: str
-    subject_id: str
-    ts_first: Optional[datetime] = None
-    ts_last: Optional[datetime] = None
-    rules: Dict[str, int] = field(default_factory=dict)
-    evidence: List[Dict[str, Any]] = field(default_factory=list)
-
-    def add(self, alert: Dict[str, Any]) -> None:
-        ts = _parse_ts(alert.get("ts"))
-        if ts:
-            if self.ts_first is None or ts < self.ts_first:
-                self.ts_first = ts
-            if self.ts_last is None or ts > self.ts_last:
-                self.ts_last = ts
-
-        rid = str(alert.get("rule_id") or "RULE_UNKNOWN")
-        self.rules[rid] = self.rules.get(rid, 0) + 1
-        self.evidence.append(_evidence_row(alert))
+def _pick_action(risk_score: int) -> str:
+    # policy (tune later):
+    if risk_score >= 90:
+        return "BLOCK"
+    if risk_score >= 50:
+        return "STEP_UP"
+    return "ALLOW"
 
 
 def score_alerts(input_alerts: str, output_decisions: str) -> Dict[str, Any]:
-    alerts = _read_jsonl(input_alerts)
+    alerts: List[Dict[str, Any]] = list(_iter_jsonl(input_alerts))
+    total_alerts = len(alerts)
 
-    # Empty alerts: write empty decisions and return summary
-    if not alerts:
-        os.makedirs(os.path.dirname(output_decisions) or ".", exist_ok=True)
-        with open(output_decisions, "w", encoding="utf-8") as f:
-            pass
-        return {
-            "input_alerts": input_alerts,
-            "output_decisions": output_decisions,
-            "total_alerts": 0,
-            "total_decisions": 0,
-        }
-
-    agg: Dict[Tuple[str, str], Agg] = {}
-
+    # group alerts by subject
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
     for a in alerts:
         st, sid = _subject_from_alert(a)
-        key = (st, sid)
-        if key not in agg:
-            agg[key] = Agg(subject_type=st, subject_id=sid)
-        agg[key].add(a)
+        groups[(st, sid)].append(a)
 
     def decisions() -> Iterator[Dict[str, Any]]:
-        for (_st, _sid), a in agg.items():
-            # Score = weighted sum of rule counts
-            score = 0
-            for rid, cnt in a.rules.items():
-                score += RULE_WEIGHTS.get(rid, 10) * int(cnt)
+        for (st, sid), arr in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1])):
+            ts_vals = [a.get("ts") for a in arr if a.get("ts") is not None]
+            ts_first = min(ts_vals) if ts_vals else None
+            ts_last = max(ts_vals) if ts_vals else None
 
-            if score >= 90:
-                action = "BLOCK"
-            elif score >= 50:
-                action = "STEP_UP"
-            else:
-                action = "ALLOW"
+            # compute max risk for the subject
+            risks = [_risk_from_alert(a) for a in arr]
+            max_risk = max(risks) if risks else 0
+            action = _pick_action(max_risk)
 
-            rule_items = []
-            for rid, cnt in a.rules.items():
-                rule_items.append((RULE_WEIGHTS.get(rid, 10) * int(cnt), rid, int(cnt)))
-            rule_items.sort(reverse=True)
+            # top rules
+            rule_counts = Counter(str(a.get("rule_id") or "UNKNOWN") for a in arr)
+            top_rules = [{"rule_id": rid, "count": int(c)} for rid, c in rule_counts.most_common(10)]
 
-            ev = _dedupe_evidence(a.evidence)
+            # evidence rows: 1 per alert (compact), but ensure subject fields are present
+            ev_list: List[Dict[str, Any]] = []
+            for a in arr[:50]:
+                sev = a.get("severity")
+                uid = a.get("user_id") or (a.get("entity") or {}).get("user_id")
+                ip = a.get("ip") or a.get("src_ip") or (a.get("entity") or {}).get("src_ip") or (a.get("entity") or {}).get("ip")
 
-            # Engine contract: evidence carries decision subject fields
-            for r in ev:
-                r["subject_type"] = a.subject_type
-                r["subject_id"] = a.subject_id
+                ev_list.append({
+                    "ts": a.get("ts"),
+                    "rule_id": a.get("rule_id"),
+                    "severity": sev,
+                    "user_id": uid,
+                    "session_id": a.get("session_id"),
+                    "token_id": a.get("token_id"),
+                    "ip": ip,
+                    "country": a.get("country"),
+                    "subject_type": st,
+                    "subject_id": sid,
+                })
 
             yield {
-                "ts_first": a.ts_first.isoformat().replace("+00:00", "Z") if a.ts_first else None,
-                "ts_last": a.ts_last.isoformat().replace("+00:00", "Z") if a.ts_last else None,
-                "subject_type": a.subject_type,
-                "subject_id": a.subject_id,
-                "risk_score": int(score),
-                "action": action,
+                "ts_first": ts_first,
+                "ts_last": ts_last,
+                "subject_type": st,
+                "subject_id": sid,
+                "risk_score": int(max_risk),
+                "action": _norm_action(action),
                 "explain": {
-                    "top_rules": [{"rule_id": rid, "count": cnt} for _, rid, cnt in rule_items[:5]],
-                    "evidence": ev[:50],
+                    "top_rules": top_rules,
+                    "evidence": ev_list,
                 },
             }
 
     total_decisions = _write_jsonl(output_decisions, decisions())
-
     return {
         "input_alerts": input_alerts,
         "output_decisions": output_decisions,
-        "total_alerts": len(alerts),
+        "total_alerts": total_alerts,
         "total_decisions": total_decisions,
     }
