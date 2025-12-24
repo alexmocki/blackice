@@ -21,6 +21,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Audit mode (off|warn|strict)",
     )
 
+
+    detect = sub.add_parser("detect", help="Input events -> alerts.jsonl (replay+detect)")
+
+    detect.add_argument("--input", required=True, help="Input JSONL file with events")
+
+    detect.add_argument("--outdir", required=True, help="Output directory")
+
+
+    decide = sub.add_parser("decide", help="alerts.jsonl -> decisions.jsonl")
+
+    decide.add_argument("--alerts", required=True, help="alerts.jsonl path")
+
+    decide.add_argument("--decisions", required=True, help="decisions.jsonl path")
+
+    decide.add_argument("--audit-mode", default="warn", choices=["off","warn","strict"])
+
+
+    trust = sub.add_parser("trust", help="decisions.jsonl -> trust.jsonl")
+
+    trust.add_argument("--decisions", required=True, help="decisions.jsonl path")
+
+    trust.add_argument("--trust", required=True, help="trust.jsonl path")
+
     return p
 
 
@@ -138,6 +161,37 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "run":
         return cmd_run(args)
+
+    elif args.command == "detect":
+        import os, json
+        from blackice.replay.run import run_replay
+        outdir = args.outdir
+        os.makedirs(outdir, exist_ok=True)
+        alerts_path = os.path.join(outdir, "alerts.jsonl")
+        replay_summary = run_replay(args.input, alerts_path)
+        if not os.path.exists(alerts_path):
+            raise SystemExit(f"detect failed: alerts not created at {alerts_path}")
+        print(json.dumps({"alerts": alerts_path, "replay": replay_summary}, indent=2, default=str))
+        return 0
+
+    elif args.command == "decide":
+        from blackice.score.score import score_alerts
+        score_summary = score_alerts(args.alerts, args.decisions, audit_mode=args.audit_mode)
+        print(__import__("json").dumps(score_summary, indent=2))
+        return 0
+    elif args.command == "trust":
+        import os, json
+        from blackice.trust.emit import emit_trust_from_decisions
+
+        if not os.path.exists(args.decisions):
+            raise SystemExit(f"trust failed: decisions file not found: {args.decisions}")
+
+        os.makedirs(os.path.dirname(args.trust) or ".", exist_ok=True)
+        trust_summary = emit_trust_from_decisions(args.decisions, args.trust)
+        if trust_summary is None:
+            trust_summary = {"trust": args.trust}
+        print(json.dumps({"trust": args.trust, "trust_summary": trust_summary}, indent=2))
+        return 0
 
     raise SystemExit(f"Unknown command: {args.command}")
 
