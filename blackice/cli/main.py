@@ -101,6 +101,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if os.path.exists(alerts_tmp) and not os.path.exists(alerts_path):
         os.replace(alerts_tmp, alerts_path)
 
+
     # 2) score alerts -> decisions
     score_summary: Any = score_alerts(alerts_path, decisions_tmp, audit_mode=args.audit_mode)
 
