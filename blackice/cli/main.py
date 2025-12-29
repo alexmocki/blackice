@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from blackice.cli.validate import normalize_decisions_jsonl
+from blackice.cli.score import score_alerts as _score_alerts
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -103,7 +105,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
     # 2) score alerts -> decisions
-    score_summary: Any = score_alerts(alerts_path, decisions_tmp, audit_mode=args.audit_mode)
+    score_summary: Any = _score_alerts(alerts_path, decisions_tmp)
 
     if os.path.exists(decisions_tmp):
         os.replace(decisions_tmp, decisions_path)
@@ -160,6 +162,44 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+
+    # BEGIN_DECIDE_AUDIT_GATE
+    # decide: alerts.jsonl -> decisions.jsonl (+ audit-mode gate)
+    if getattr(args, "command", None) == "decide":
+        import json as _json
+        # 1) produce decisions
+        summary = _score_alerts(args.alerts, args.decisions)
+
+        if not isinstance(summary, dict):
+            summary = {"result": summary}
+
+        audit_mode = getattr(args, "audit_mode", "off")
+
+        # 2) normalize + gate (only when audit-mode != off)
+        normalized_count = 0
+        if audit_mode != "off":
+            decisions_path = args.decisions
+            tmp_norm = decisions_path + ".norm"
+            total, written = normalize_decisions_jsonl(decisions_path, tmp_norm)
+
+            before = Path(decisions_path).read_bytes() if Path(decisions_path).exists() else b""
+            after = Path(tmp_norm).read_bytes() if Path(tmp_norm).exists() else b""
+            changed = (before != after)
+
+            Path(tmp_norm).replace(Path(decisions_path))
+
+            normalized_count = 1 if changed else 0
+
+            if audit_mode == "strict" and changed:
+                summary.update({"normalized_count": normalized_count, "audit_mode": audit_mode})
+                print(_json.dumps(summary, indent=2))
+                raise SystemExit(3)
+
+        summary.update({"normalized_count": normalized_count, "audit_mode": audit_mode})
+        print(_json.dumps(summary, indent=2))
+        return 0
+    # END_DECIDE_AUDIT_GATE
+
     if args.command == "run":
         return cmd_run(args)
 
@@ -177,7 +217,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     elif args.command == "decide":
         from blackice.score.score import score_alerts
-        score_summary = score_alerts(args.alerts, args.decisions, audit_mode=args.audit_mode)
+        score_summary = _score_alerts(args.alerts, args.decisions)
         print(__import__("json").dumps(score_summary, indent=2))
         return 0
     elif args.command == "trust":
