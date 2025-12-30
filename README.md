@@ -192,3 +192,34 @@ make proof
 ```
 
 Produces: demo/out/{alerts,decisions,trust}.jsonl
+
+---
+
+## Audit Mode (Adversarial Safety Gate)
+
+BlackIce includes a first-class adversarial audit gate that enforces
+decision integrity during normalization.
+
+Normalization may:
+- remove duplicated evidence
+- inject missing subject identity
+- realign rule and evidence mappings
+
+WARNING: In many systems this happens silently.
+BlackIce makes this explicit and enforceable.
+
+### Audit Modes
+
+- off: normalization allowed, no audit
+- warn: writes an audit report only if output changes
+- strict: fails the pipeline if normalization would change output
+
+### Example
+
+```bash
+python -m blackice run \
+  --input data/samples/toy.jsonl \
+  --outdir data/out \
+  --audit-mode strict
+```
+
