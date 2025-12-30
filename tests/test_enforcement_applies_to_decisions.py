@@ -9,7 +9,6 @@ def test_apply_enforcement_to_decisions(tmp_path):
     decisions = tmp_path / "decisions.jsonl"
     trust = tmp_path / "trust.jsonl"
 
-    # Create decisions: drive trust down, then attempt ALLOW which should be enforced to BLOCK by trust rules.
     rows = [
         {"ts_first":"2025-01-01T00:00:00Z","ts_last":"2025-01-01T00:00:00Z","subject_type":"user","subject_id":"u1","action":"BLOCK","rules":["R1"]},
         {"ts_first":"2025-01-01T00:01:00Z","ts_last":"2025-01-01T00:01:00Z","subject_type":"user","subject_id":"u1","action":"BLOCK","rules":["R2"]},
@@ -17,11 +16,9 @@ def test_apply_enforcement_to_decisions(tmp_path):
     ]
     decisions.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
-    # Emit trust from decisions (this produces enforced_action per row)
     summary_trust = emit_trust_from_decisions(str(decisions), str(trust))
     assert summary_trust["trust_rows"] == 3
 
-    # Apply enforcement back into decisions.jsonl
     summary = apply_enforcement_to_decisions(str(decisions), str(trust))
     assert summary["total"] == 3
     assert summary["overrides"] >= 1

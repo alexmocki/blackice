@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any
 
 
 def _key(st: str, sid: str) -> str:
@@ -8,10 +8,6 @@ def _key(st: str, sid: str) -> str:
 
 
 def _load_latest_enforcement(trust_path: str) -> Dict[str, Dict[str, Any]]:
-    """
-    Reads trust.jsonl and returns latest row per subject:
-      key -> {"enforced_action": str, "enforcement_reason": Optional[str], "trust_after": Optional[int]}
-    """
     p = Path(trust_path)
     latest: Dict[str, Dict[str, Any]] = {}
     if not p.exists():
@@ -43,14 +39,6 @@ def _load_latest_enforcement(trust_path: str) -> Dict[str, Dict[str, Any]]:
 
 
 def apply_enforcement_to_decisions(decisions_path: str, trust_path: str) -> Dict[str, Any]:
-    """
-    Rewrites decisions.jsonl in-place by adding:
-      - action_final
-      - enforced (bool)
-      - enforcement_reason
-      - trust_after (if available)
-    Keeps original 'action' untouched for backwards compatibility.
-    """
     dp = Path(decisions_path)
     if not dp.exists():
         return {"decisions_path": decisions_path, "trust_path": trust_path, "total": 0, "overrides": 0}
@@ -70,7 +58,6 @@ def apply_enforcement_to_decisions(decisions_path: str, trust_path: str) -> Dict
             try:
                 d = json.loads(raw)
             except Exception:
-                # keep line as-is if it's not valid json
                 out_lines.append(raw)
                 continue
 
@@ -92,12 +79,8 @@ def apply_enforcement_to_decisions(decisions_path: str, trust_path: str) -> Dict
                     if info.get("trust_after") is not None:
                         d["trust_after"] = info.get("trust_after")
                 else:
-                    # no trust row for subject -> final = original
                     d["action_final"] = action
                     d["enforced"] = False
-            else:
-                # missing subject/action -> leave unchanged
-                pass
 
             out_lines.append(json.dumps(d, ensure_ascii=False))
 
