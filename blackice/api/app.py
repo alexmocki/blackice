@@ -1,85 +1,79 @@
-import tempfile
+from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException
 from pathlib import Path
-from typing import Any, Dict, Optional
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from typing import Optional
+import json
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+from blackice.api.schemas import RunRequest, RunResponse, RunArtifacts
 
-from blackice.cli.replay import run_replay
-from blackice.cli.score import score_alerts
-from blackice.trust.emit import emit_trust_from_decisions
-
-try:
-    from blackice.cli.validate import normalize_decisions_jsonl  # type: ignore
-except Exception:
-    normalize_decisions_jsonl = None  # type: ignore
-
+# Run the pipeline in-process (no subprocess). This keeps it fast and testable.
+from blackice.cli.main import cmd_run
 
 app = FastAPI(title="BlackIce API", version="0.1.0")
 
 
-class RunRequest(BaseModel):
-    events_jsonl: str
-    audit_mode: str = "warn"   # off|warn|strict
-    normalize: bool = True
-
-
 @app.get("/healthz")
-def healthz() -> Dict[str, Any]:
+def healthz():
     return {"ok": True}
 
 
-def _write_text(path: Path, s: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(s if s.endswith("\n") or s == "" else (s + "\n"), encoding="utf-8")
+def _read_text(p: Path) -> str:
+    return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.exists() else ""
+def _try_read_audit(outdir: Path) -> Optional[dict]:
+    """
+    Best-effort: read the most recent audit JSON if present.
+    We keep this flexible because audit file naming can evolve.
+    """
+    candidates = []
+    for p in outdir.rglob("*.json"):
+        name = p.name.lower()
+        if "audit" in name or "normal" in name:
+            candidates.append(p)
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda x: x.stat().st_mtime)
+    try:
+        return json.loads(latest.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
-@app.post("/v1/run")
-def v1_run(req: RunRequest) -> Dict[str, Any]:
-    with tempfile.TemporaryDirectory() as td:
-        td = Path(td)
-        events = td / "events.jsonl"
-        alerts = td / "alerts.jsonl"
-        decisions = td / "decisions.jsonl"
-        trust = td / "trust.jsonl"
+@app.post("/v1/run", response_model=RunResponse)
+def run(req: RunRequest) -> RunResponse:
+    with TemporaryDirectory() as td:
+        outdir = Path(td)
 
-        _write_text(events, req.events_jsonl)
+        events_path = outdir / "events.jsonl"
+        txt = req.events_jsonl
+        if txt and not txt.endswith("\n"):
+            txt += "\n"
+        events_path.write_text(txt, encoding="utf-8")
 
-        replay_summary = run_replay(str(events), str(alerts))
+        args = SimpleNamespace(
+            command="run",
+            input=str(events_path),
+            outdir=str(outdir),
+            audit_mode=req.audit_mode,
+        )
 
-        # score_alerts in this repo may or may not accept audit_mode
-        try:
-            score_summary = score_alerts(str(alerts), str(decisions), audit_mode=req.audit_mode)  # type: ignore
-        except TypeError:
-            score_summary = score_alerts(str(alerts), str(decisions))  # type: ignore
+        rc = cmd_run(args)
+        if rc != 0:
+            raise HTTPException(status_code=500, detail={"ok": False, "exit_code": rc})
 
-        norm_summary: Optional[Dict[str, Any]] = None
-        if req.normalize and normalize_decisions_jsonl is not None:
-            tmp_norm = str(decisions) + ".norm"
-            total, written = normalize_decisions_jsonl(str(decisions), tmp_norm)  # type: ignore
-            before = decisions.read_bytes() if decisions.exists() else b""
-            after = Path(tmp_norm).read_bytes() if Path(tmp_norm).exists() else b""
-            changed = before != after
-            Path(tmp_norm).replace(decisions)
-            norm_summary = {"total": total, "written": written, "changed": changed}
-            if req.audit_mode == "strict" and changed:
-                return {"ok": False, "error": "STRICT_AUDIT_FAILED", "normalized": norm_summary}
+        alerts_path = outdir / "alerts.jsonl"
+        decisions_path = outdir / "decisions.jsonl"
+        trust_path = outdir / "trust.jsonl"
 
-        trust_summary = emit_trust_from_decisions(str(decisions), str(trust))
+        artifacts = RunArtifacts(
+            alerts_jsonl=_read_text(alerts_path),
+            decisions_jsonl=_read_text(decisions_path),
+            trust_jsonl=_read_text(trust_path) if trust_path.exists() else None,
+        )
 
-        return {
-            "ok": True,
-            "replay": replay_summary,
-            "score": score_summary,
-            "normalized": norm_summary,
-            "trust": trust_summary,
-            "artifacts": {
-                "alerts_jsonl": _read_text(alerts),
-                "decisions_jsonl": _read_text(decisions),
-                "trust_jsonl": _read_text(trust),
-            },
-        }
+        audit = _try_read_audit(outdir) if req.audit_mode != "off" else None
+        return RunResponse(ok=True, artifacts=artifacts, audit=audit)
