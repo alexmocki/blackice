@@ -223,3 +223,20 @@ python -m blackice run \
   --audit-mode strict
 ```
 
+
+---
+
+## 🌐 API (FastAPI)
+
+BlackIce ships with a local FastAPI service for running the pipeline and returning JSONL artifacts.
+
+### Run locally
+
+```bash
+python3 -m uvicorn blackice.api.app:app --reload --port 8000
+```
+
+
+
+---
+
