@@ -1,91 +1,68 @@
-from __future__ import annotations
-
 import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone
+from typing import Dict
 
+from blackice.trust.engine import apply_decision
 
-@dataclass
-class TrustPolicy:
-    start: int = 100
-    floor: int = 0
-    ceil: int = 100
-
-    # per decision delta
-    allow_delta: int = 0
-    review_delta: int = -1
-    stepup_delta: int = -5
-    deny_delta: int = -10
-
-    def delta_for(self, decision: str) -> int:
-        d = (decision or "").lower().strip()
-        if d == "deny":
-            return self.deny_delta
-        if d == "stepup":
-            return self.stepup_delta
-        if d == "review":
-            return self.review_delta
-        return self.allow_delta
-
-
-def _clamp(x: int, lo: int, hi: int) -> int:
-    return lo if x < lo else hi if x > hi else x
-
-
-def emit_trust_from_decisions(
-    decisions_path: str,
-    trust_path: str,
-    policy: Optional[TrustPolicy] = None,
-) -> Dict[str, Any]:
+def emit_trust_from_decisions(decisions_path: str, trust_path: str):
     """
-    Reads decisions.jsonl and writes trust.jsonl rows:
-      {
-        "user_id": "...",
-        "alert_id": "...",
-        "rule_id": "...",
-        "decision": "...",
-        "delta": -5,
-        "trust": 87
-      }
-    Returns summary {trust_rows, users}.
+    Read decisions.jsonl and append trust rows to trust.jsonl.
+    Deterministic, append-only.
     """
-    pol = policy or TrustPolicy()
+    decisions_path = Path(decisions_path)
+    trust_path = Path(trust_path)
 
-    inp = Path(decisions_path)
-    out = Path(trust_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    trust_state: Dict[str, int] = {}
 
-    trust: Dict[str, int] = {}
-    n = 0
+    # Load existing trust state if ledger exists
+    if trust_path.exists():
+        with trust_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                key = f"{row['subject_type']}:{row['subject_id']}"
+                trust_state[key] = row["trust_after"]
 
-    with inp.open("r", encoding="utf-8") as f_in, out.open("w", encoding="utf-8") as f_out:
+    rows_written = 0
+
+    with decisions_path.open("r", encoding="utf-8") as f_in, \
+         trust_path.open("a", encoding="utf-8") as f_out:
+
         for line in f_in:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                d = json.loads(line)
-            except Exception:
+            if not line.strip():
                 continue
 
-            user_id = d.get("user_id") or "unknown"
-            decision = d.get("decision") or "review"
-            delta = int(pol.delta_for(decision))
+            d = json.loads(line)
 
-            cur = trust.get(user_id, pol.start)
-            nxt = _clamp(cur + delta, pol.floor, pol.ceil)
-            trust[user_id] = nxt
+            subject_type = d.get("subject_type")
+            subject_id = d.get("subject_id")
+            decision = d.get("action")
+
+            if not subject_type or not subject_id or not decision:
+                continue
+
+            key = f"{subject_type}:{subject_id}"
+            trust_before = trust_state.get(key, 100)
+            trust_after = apply_decision(trust_before, decision)
 
             row = {
-                "user_id": user_id,
-                "alert_id": d.get("alert_id"),
-                "rule_id": d.get("rule_id"),
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "subject_type": subject_type,
+                "subject_id": subject_id,
                 "decision": decision,
-                "delta": delta,
-                "trust": nxt,
+                "trust_before": trust_before,
+                "trust_after": trust_after,
+                "delta": trust_after - trust_before,
+                "reasons": d.get("rules", []),
             }
-            f_out.write(json.dumps(row, ensure_ascii=False) + "\n")
-            n += 1
 
-    return {"trust_rows": n, "users": len(trust)}
+            f_out.write(json.dumps(row) + "\n")
+            trust_state[key] = trust_after
+            rows_written += 1
+
+    return {
+        "trust_rows": rows_written,
+        "subjects": len(trust_state),
+    }
