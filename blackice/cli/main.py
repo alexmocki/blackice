@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from blackice.trust.enforce import apply_enforcement_to_decisions
 from blackice.cli.validate import normalize_decisions_jsonl
 from blackice.cli.score import score_alerts as _score_alerts
 import os
@@ -116,6 +117,37 @@ def cmd_run(args: argparse.Namespace) -> int:
         trust_summary = emit_trust_from_decisions(decisions_path, trust_path)
     except Exception:
         trust_summary = None
+
+    # 3b) ENFORCE: trust -> decisions (SSOT)
+    try:
+        enforcement = apply_enforcement_to_decisions(decisions_path, trust_path)
+    except Exception:
+        enforcement = None
+
+    # Optional: audit-mode gate also covers enforcement changes
+    try:
+        if enforcement and isinstance(enforcement, dict):
+            summary["enforcement"] = enforcement
+            overrides = int(enforcement.get("overrides", 0) or 0)
+
+            # WARN: write report only if overrides happened
+            if getattr(args, "audit_mode", "off") == "warn" and overrides > 0:
+                import os as _os
+                from datetime import datetime, timezone
+                reports_dir = _os.path.join(args.outdir, "reports")
+                _os.makedirs(reports_dir, exist_ok=True)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                report_path = _os.path.join(reports_dir, f"enforcement_{stamp}.json")
+                with open(report_path, "w", encoding="utf-8") as rf:
+                    import json as _json
+                    rf.write(_json.dumps(enforcement, indent=2))
+                summary["enforcement_report"] = report_path
+
+            # STRICT: fail if enforcement would change output
+            if getattr(args, "audit_mode", "off") == "strict" and overrides > 0:
+                raise SystemExit(3)
+    except Exception:
+        pass
 
 
     # 3) optional normalize/audit
