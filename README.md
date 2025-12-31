@@ -240,3 +240,25 @@ python3 -m uvicorn blackice.api.app:app --reload --port 8000
 
 ---
 
+
+---
+
+## 📘 OpenAPI & API Usage
+
+BlackIce exposes a **FastAPI** service with a documented OpenAPI schema.
+
+### OpenAPI / Swagger UI
+
+Once the server is running, open:
+
+- http://127.0.0.1:8000/docs
+- http://127.0.0.1:8000/openapi.json
+
+---
+
+## 🔍 Health Check
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
