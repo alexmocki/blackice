@@ -34,4 +34,9 @@ Artifacts:
 
 You can download these artifacts from the GitHub Actions run UI for each workflow run.
 
+## Aggregated metrics report
+A scheduled/manual workflow `metrics-collector.yml` aggregates the most recent runs' metrics artifacts and produces `metrics-report.csv` (columns: `run_id, run_number, created_at, html_url, pip_cache_hit, pip_install_time, docker_build_time`).
+
+To collect metrics manually from the Actions UI, trigger the "Metrics collector" workflow or wait for the daily run.
+
 Make sure you have `GITHUB_TOKEN` or appropriate secrets configured to push images to GHCR.
