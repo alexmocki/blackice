@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache pip
+        id: pip-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -26,8 +27,17 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: 3.11
-      - name: Install deps
-        run: pip install -r requirements-dev.txt
+      - name: Install deps (timed)
+        id: pip-install
+        run: |
+          start=$(date +%s)
+          pip install -r requirements-dev.txt
+          dur=$(( $(date +%s) - start ))
+          echo "pip_install_time=$dur" >> $GITHUB_OUTPUT
+      - name: Show pip cache metrics
+        run: |
+          echo "pip cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"
+          echo "pip install time: ${{ steps.pip-install.outputs.pip_install_time }}s"
       - name: Run tests
         run: pytest -q
 
@@ -46,17 +56,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
-            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.sha }}
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Timed build and push (Buildx)
+        id: docker-build
+        run: |
+          start=$(date +%s)
+          docker buildx build --push \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
+            -t ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest \
+            -t ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.sha }} \
+            -f ./Dockerfile --platform linux/amd64,linux/arm64 .
+          dur=$(( $(date +%s) - start ))
+          echo "docker_build_time=$dur" >> $GITHUB_OUTPUT
+      - name: Show docker build metrics
+        run: |
+          echo "docker build time: ${{ steps.docker-build.outputs.docker_build_time }}s"
+          # Note: Buildx caching (`type=gha`) is used; cache hit details are not exposed by Buildx but build time differences indicate effectiveness.
 
   integration:
     needs: test
