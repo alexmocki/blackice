@@ -27,3 +27,6 @@ def test_run_endpoint_ok():
     assert "alerts_jsonl" in j["artifacts"]
     assert "decisions_jsonl" in j["artifacts"]
     assert "trust_jsonl" in j["artifacts"]
+
+    # expect non-empty replay output for the toy fixture
+    assert j["summary"]["replay"]["total_alerts"] > 0

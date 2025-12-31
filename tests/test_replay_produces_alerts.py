@@ -12,11 +12,12 @@ def test_replay_produces_alerts(tmp_path):
     # replay must complete
     assert isinstance(summary, dict)
 
-    # rules must be loaded
+    # rules must be discovered and at least some should load
     assert summary.get("rules_discovered", 0) > 0
+    assert summary.get("rules_loaded", 0) > 0
 
     # output file must exist
     assert out_alerts.exists()
 
-    # alerts may be zero (depends on fixture + rules)
-    assert summary.get("total_alerts", 0) >= 0
+    # we expect the toy fixture to produce alerts in this demo
+    assert summary.get("total_alerts", 0) > 0

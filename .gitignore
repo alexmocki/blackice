@@ -33,3 +33,6 @@ __pycache__/
 demo/
 ssot_fix*.sh
 ssot_run.sh
+
+# Build artifacts
+*.egg-info/

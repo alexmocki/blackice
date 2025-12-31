@@ -106,6 +106,30 @@ def run_replay(input_path: str, output_path: str) -> Dict[str, Any]:
         loaded.append(modname)
         invoked.append(kind or "unknown")
 
+    # If no modules were loaded by the classic module-based discovery, try the
+    # detector engine which discovers class-based detectors under
+    # `blackice.detections.rules` and runs them (supports stateful detectors).
+    if len(loaded) == 0:
+        try:
+            from blackice.detections import engine as detections_engine
+
+            eng_res = detections_engine.detect(events)
+            alerts = eng_res.get("alerts", [])
+            _write_jsonl(output_path, alerts)
+            return {
+                "input_path": input_path,
+                "output_path": output_path,
+                "total_events": len(events),
+                "total_alerts": len(alerts),
+                "rules_discovered": eng_res.get("rules_discovered", 0),
+                "rules_loaded": eng_res.get("rules_loaded", 0),
+                "rules_invoked": list(eng_res.get("rule_hits", {}).keys()),
+                "rules": [],
+            }
+        except Exception:
+            # fall through to return existing summary
+            pass
+
     _write_jsonl(output_path, alerts)
 
     return {

@@ -38,15 +38,23 @@ def _discover_rule_classes() -> List[type]:
                 continue
             if obj.__name__.lower().endswith("test"):
                 continue
-            if hasattr(obj, "detect") and callable(getattr(obj, "detect")):
+            if ((hasattr(obj, "detect") and callable(getattr(obj, "detect")))
+                    or (hasattr(obj, "process") and callable(getattr(obj, "process")))):
                 classes.append(obj)
     return classes
 
 
 def _instantiate_rule(cls: type) -> Tuple[Any | None, str | None]:
     """
-    Try to instantiate a rule class. If it needs args and no defaults, skip with reason.
+    Try to instantiate a rule class. Prefer attempting a no-arg instantiation; if that fails, inspect
+    the signature to provide a helpful reason for skipping.
     """
+    try:
+        # Prefer the straightforward attempt first — many rules accept no-args.
+        return cls(), None
+    except Exception:
+        pass
+
     try:
         sig = inspect.signature(cls)
         params = list(sig.parameters.values())
@@ -56,14 +64,13 @@ def _instantiate_rule(cls: type) -> Tuple[Any | None, str | None]:
             if p.default is inspect._empty and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
         ]
         if len(required) == 0:
-            return cls(), None
+            try:
+                return cls(), None
+            except Exception as e:
+                return None, f"cannot instantiate: {e!r}"
         return None, f"requires args: {[p.name for p in required]}"
     except Exception as e:
-        # Some classes don't have an inspectable signature; try no-arg anyway.
-        try:
-            return cls(), None
-        except Exception as e2:
-            return None, f"cannot instantiate: {e2!r} (signature err: {e!r})"
+        return None, f"cannot inspect signature: {e!r}"
 
 def _build_trust_rows(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -141,7 +148,13 @@ def detect(events: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         for r in rules:
             rname = type(r).__name__
             try:
-                produced = r.detect(ev)  # expected list[Alert] (or list[dict])
+                if hasattr(r, "detect") and callable(getattr(r, "detect")):
+                    produced = r.detect(ev)
+                elif hasattr(r, "process") and callable(getattr(r, "process")):
+                    produced = r.process(ev)
+                else:
+                    # no callable entrypoint found on rule instance; skip
+                    continue
             except Exception as e:
                 # A rule crashing shouldn't kill the whole run
                 skipped[rname] = f"runtime error: {e!r}"
