@@ -15,7 +15,8 @@ from blackice.api.schemas import ErrorResponse, RunRequest, RunResponse, Artifac
 
 # Import core pipeline pieces
 from blackice.cli.replay import run_replay
-from blackice.cli.score import score_alerts
+from blackice.score.score import score_alerts
+from blackice.cli.validate import normalize_decisions_jsonl
 from blackice.trust.emit import emit_trust_from_decisions
 
 log = logging.getLogger("blackice.api")
@@ -145,11 +146,32 @@ def run_endpoint(req: RunRequest, request: Request):
         # 1) replay -> alerts
         replay_summary = run_replay(events, alerts)
 
-        # 2) score -> decisions
-        # score_alerts signature does NOT accept audit_mode; audit happens in CLI main for run/decide.
-        score_summary: Dict[str, Any] = score_alerts(alerts, decisions)
+        # 2) score -> decisions (accept audit_mode when available)
+        try:
+            score_summary: Dict[str, Any] = score_alerts(alerts, decisions, audit_mode=req.audit_mode)
+        except TypeError:
+            # backward compatibility
+            score_summary: Dict[str, Any] = score_alerts(alerts, decisions)
 
-        # 3) trust
+        # 2b) optional normalization + audit-mode gate (when normalize=True and audit_mode != off)
+        normalized_count = 0
+        if req.normalize and req.audit_mode != "off":
+            tmp_norm = decisions + ".norm"
+            total, written = normalize_decisions_jsonl(decisions, tmp_norm)
+
+            before = Path(decisions).read_bytes() if Path(decisions).exists() else b""
+            after = Path(tmp_norm).read_bytes() if Path(tmp_norm).exists() else b""
+            changed = (before != after)
+
+            Path(tmp_norm).replace(Path(decisions))
+
+            normalized_count = 1 if changed else 0
+
+            if req.audit_mode == "strict" and changed:
+                details = {"normalized_count": normalized_count, "audit_mode": req.audit_mode}
+                return _error(rid, 409, "AUDIT_NORMALIZATION", "Decisions normalization changed output in strict audit mode.", details=details, hint="Set audit_mode=warn or normalize=False to bypass.")
+
+        # 3) decisions -> trust
         trust_summary = emit_trust_from_decisions(decisions, trust)
 
         artifacts = Artifacts(

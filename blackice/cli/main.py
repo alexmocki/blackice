@@ -58,133 +58,15 @@ def _atomic_write_jsonl(path: str, rows: list) -> None:
     os.replace(tmp, path)
 
 
-def cmd_run(args: argparse.Namespace) -> int:
-    outdir = args.outdir
-    os.makedirs(outdir, exist_ok=True)
+def cmd_run(args):
+    import json
+    from blackice.pipeline.run import run_pipeline
 
-    alerts_path = os.path.join(outdir, "alerts.jsonl")
-    decisions_path = os.path.join(outdir, "decisions.jsonl")
-    trust_path = os.path.join(outdir, "trust.jsonl")
-    trust_ledger_path = os.path.join(outdir, "trust_ledger.jsonl")
-
-    # temp files (optional, if scorer writes tmp)
-    alerts_tmp = alerts_path + ".tmp"
-    decisions_tmp = decisions_path + ".tmp"
-
-    # Import pipeline functions lazily so module import never crashes.
-    try:
-        from blackice.replay.run import run_replay  # type: ignore
-    except Exception as e:
-        raise SystemExit(f"Missing run_replay (blackice.replay.run): {e}")
-
-    try:
-        from blackice.score.score import score_alerts  # type: ignore
-    except Exception:
-        # fallback: maybe it lives elsewhere in your project
-        try:
-            from blackice.detections.score import score_alerts  # type: ignore
-        except Exception as e:
-            raise SystemExit(f"Missing score_alerts: {e}")
-
-    # 1) replay -> alerts (your run_replay should write alerts.jsonl or return data)
-    replay_summary: Any = run_replay(args.input, alerts_path)
-
-    # If replay_summary includes trust rows, write them (optional feature)
-    trust_rows_list = None
-    try:
-        if isinstance(replay_summary, dict):
-            trust_rows_list = replay_summary.get("trust_rows")
-    except Exception:
-        trust_rows_list = None
-
-    if trust_rows_list:
-        _atomic_write_jsonl(trust_ledger_path, trust_rows_list)
-
-    # Some pipelines wrote alerts to alerts_tmp then replace; keep safe.
-    if os.path.exists(alerts_tmp) and not os.path.exists(alerts_path):
-        os.replace(alerts_tmp, alerts_path)
-
-
-    # 2) score alerts -> decisions
-    score_summary: Any = _score_alerts(alerts_path, decisions_tmp)
-
-    if os.path.exists(decisions_tmp):
-        os.replace(decisions_tmp, decisions_path)
-
-    # 3) trust ledger from decisions (killer feature)
-    try:
-        from blackice.trust.emit import emit_trust_from_decisions  # type: ignore
-        trust_summary = emit_trust_from_decisions(decisions_path, trust_path)
-    except Exception:
-        trust_summary = None
-
-    # 3b) ENFORCE: trust -> decisions (SSOT)
-    try:
-        enforcement = apply_enforcement_to_decisions(decisions_path, trust_path)
-    except Exception:
-        enforcement = None
-
-    # Optional: audit-mode gate also covers enforcement changes
-    try:
-        if enforcement and isinstance(enforcement, dict):
-            summary["enforcement"] = enforcement
-            overrides = int(enforcement.get("overrides", 0) or 0)
-
-            # WARN: write report only if overrides happened
-            if getattr(args, "audit_mode", "off") == "warn" and overrides > 0:
-                import os as _os
-                from datetime import datetime, timezone
-                reports_dir = _os.path.join(args.outdir, "reports")
-                _os.makedirs(reports_dir, exist_ok=True)
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                report_path = _os.path.join(reports_dir, f"enforcement_{stamp}.json")
-                with open(report_path, "w", encoding="utf-8") as rf:
-                    import json as _json
-                    rf.write(_json.dumps(enforcement, indent=2))
-                summary["enforcement_report"] = report_path
-
-            # STRICT: fail if enforcement would change output
-            if getattr(args, "audit_mode", "off") == "strict" and overrides > 0:
-                raise SystemExit(3)
-    except Exception:
-        pass
-
-
-    # 3) optional normalize/audit
-    norm_report: Optional[Any] = None
-    try:
-        # If your project defines normalize_with_audit somewhere, import it
-        from blackice.normalize.audit import normalize_with_audit  # type: ignore
-
-        norm_report = normalize_with_audit(
-            decisions_path,
-            audit_mode=args.audit_mode,
-        )
-    except Exception:
-        norm_report = None
-
-    # 4) trust rows count if trust.jsonl exists
-    trust_rows = None
-    if os.path.exists(trust_path):
-        try:
-            with open(trust_path, "r", encoding="utf-8") as f:
-                trust_rows = sum(1 for _ in f)
-        except Exception:
-            trust_rows = None
-
-    summary: Dict[str, Any] = {
-        "replay": replay_summary,
-        "score": score_summary,
-        "normalized": norm_report,
-        "trust_rows": trust_rows,
-        "trust_summary": trust_summary,
-        "paths": {
-            "alerts": alerts_path,
-            "decisions": decisions_path,
-            "trust": trust_path,
-            "reports": outdir,
-        },
-    }
+    summary = run_pipeline(
+        input_path=args.input,
+        outdir=args.outdir,
+        audit_mode=getattr(args, "audit_mode", "warn"),
+    )
 
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
