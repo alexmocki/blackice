@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.env
+.venv
+venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Git
+.git
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+
+# Docker
+docker-compose.override.yml

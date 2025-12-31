@@ -256,6 +256,16 @@ Once the server is running, open:
 - http://127.0.0.1:8000/docs
 - http://127.0.0.1:8000/openapi.json
 
+## 🐳 Docker
+
+This project includes a `Dockerfile` and `docker-compose.yml` for local development. See `docs/DOCKER.md` for build and run instructions:
+
+- Build: `docker build -t blackice:local .`
+- Run: `docker run -p 8080:8080 blackice:local`
+- Dev: `docker-compose up` (runs uvicorn with `--reload` and mounts the repo)
+
+
+
 ---
 
 ## 🔍 Health Check
