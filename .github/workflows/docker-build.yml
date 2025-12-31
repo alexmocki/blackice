@@ -38,6 +38,15 @@ jobs:
         run: |
           echo "pip cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"
           echo "pip install time: ${{ steps.pip-install.outputs.pip_install_time }}s"
+      - name: Save pip metrics artifact
+        run: |
+          mkdir -p artifacts
+          echo "{\"pip_cache_hit\": \"${{ steps.pip-cache.outputs.cache-hit }}\", \"pip_install_time\": \"${{ steps.pip-install.outputs.pip_install_time }}\"}" > artifacts/pip-metrics.json
+      - name: Upload pip metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-metrics
+          path: artifacts/pip-metrics.json
       - name: Run tests
         run: pytest -q
 
@@ -72,6 +81,15 @@ jobs:
         run: |
           echo "docker build time: ${{ steps.docker-build.outputs.docker_build_time }}s"
           # Note: Buildx caching (`type=gha`) is used; cache hit details are not exposed by Buildx but build time differences indicate effectiveness.
+      - name: Save docker metrics artifact
+        run: |
+          mkdir -p artifacts
+          echo "{\"docker_build_time\": \"${{ steps.docker-build.outputs.docker_build_time }}\"}" > artifacts/docker-metrics.json
+      - name: Upload docker metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-metrics
+          path: artifacts/docker-metrics.json
 
   integration:
     needs: test

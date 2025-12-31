@@ -28,4 +28,10 @@ The workflow uses cache helpers to speed builds and emits basic cache metrics:
 
 These timings are printed in workflow logs under the respective job steps ("Show pip cache metrics" and "Show docker build metrics").
 
+Artifacts:
+- `pip-metrics`: JSON artifact produced by the `test` job containing `{ "pip_cache_hit": "true|false", "pip_install_time": "<seconds>" }`.
+- `docker-metrics`: JSON artifact produced by the `build-and-push` job containing `{ "docker_build_time": "<seconds>" }`.
+
+You can download these artifacts from the GitHub Actions run UI for each workflow run.
+
 Make sure you have `GITHUB_TOKEN` or appropriate secrets configured to push images to GHCR.
