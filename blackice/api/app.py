@@ -1,79 +1,173 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from types import SimpleNamespace
-from typing import Optional
 import json
+import logging
+import os
+import tempfile
+import uuid
+from pathlib import Path
+from typing import Any, Dict
 
-from blackice.api.schemas import RunRequest, RunResponse, RunArtifacts
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
-# Run the pipeline in-process (no subprocess). This keeps it fast and testable.
-from blackice.cli.main import cmd_run
+from blackice.api.schemas import ErrorResponse, RunRequest, RunResponse, Artifacts
 
-app = FastAPI(title="BlackIce API", version="0.1.0")
+# Import core pipeline pieces
+from blackice.cli.replay import run_replay
+from blackice.cli.score import score_alerts
+from blackice.trust.emit import emit_trust_from_decisions
 
-
-@app.get("/healthz")
-def healthz():
-    return {"ok": True}
-
-
-def _read_text(p: Path) -> str:
-    return p.read_text(encoding="utf-8") if p.exists() else ""
+log = logging.getLogger("blackice.api")
+if not log.handlers:
+    logging.basicConfig(level=logging.INFO)
 
 
-def _try_read_audit(outdir: Path) -> Optional[dict]:
-    """
-    Best-effort: read the most recent audit JSON if present.
-    We keep this flexible because audit file naming can evolve.
-    """
-    candidates = []
-    for p in outdir.rglob("*.json"):
-        name = p.name.lower()
-        if "audit" in name or "normal" in name:
-            candidates.append(p)
-    if not candidates:
-        return None
-    latest = max(candidates, key=lambda x: x.stat().st_mtime)
+def _read_text(p: str) -> str:
+    return Path(p).read_text(encoding="utf-8") if Path(p).exists() else ""
+
+
+def _write_text(p: str, s: str) -> None:
+    Path(p).parent.mkdir(parents=True, exist_ok=True)
+    Path(p).write_text(s, encoding="utf-8")
+
+
+def _request_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _error(request_id: str, status: int, code: str, message: str, *, details: Dict[str, Any] | None = None, hint: str | None = None):
+    payload = ErrorResponse(
+        request_id=request_id,
+        error={
+            "code": code,
+            "message": message,
+            "details": details or {},
+        },
+        hint=hint,
+    ).model_dump()
+    return JSONResponse(payload, status_code=status)
+
+
+app = FastAPI(
+    title="BlackIce API",
+    version="0.1.0",
+    description="Run BlackIce pipeline and return JSONL artifacts.",
+)
+
+
+# -----------------------------
+# Middleware: request_id + logging
+# -----------------------------
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or _request_id()
+    request.state.request_id = rid
+
     try:
-        return json.loads(latest.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+        resp = await call_next(request)
+    except Exception as e:
+        # Let exception handlers below format output; just re-raise
+        raise e
+
+    resp.headers["x-request-id"] = rid
+    return resp
 
 
-@app.post("/v1/run", response_model=RunResponse)
-def run(req: RunRequest) -> RunResponse:
-    with TemporaryDirectory() as td:
-        outdir = Path(td)
+# -----------------------------
+# Exception handlers (structured errors)
+# -----------------------------
+@app.exception_handler(Exception)
+async def handle_exception(request: Request, exc: Exception):
+    rid = getattr(request.state, "request_id", _request_id())
+    log.exception("Unhandled error rid=%s path=%s", rid, request.url.path)
+    return _error(
+        rid,
+        500,
+        "INTERNAL_ERROR",
+        "Unexpected server error.",
+        details={"type": exc.__class__.__name__},
+        hint="Check server logs using the request_id header.",
+    )
 
-        events_path = outdir / "events.jsonl"
-        txt = req.events_jsonl
-        if txt and not txt.endswith("\n"):
-            txt += "\n"
-        events_path.write_text(txt, encoding="utf-8")
 
-        args = SimpleNamespace(
-            command="run",
-            input=str(events_path),
-            outdir=str(outdir),
-            audit_mode=req.audit_mode,
+# -----------------------------
+# Routes
+# -----------------------------
+@app.get(
+    "/healthz",
+    response_model=dict,
+    responses={
+        200: {"content": {"application/json": {"example": {"ok": True}}}},
+    },
+)
+def healthz(request: Request):
+    return {"ok": True, "request_id": getattr(request.state, "request_id", "")}
+
+
+@app.post(
+    "/v1/run",
+    response_model=RunResponse,
+    responses={
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ok": True,
+                        "request_id": "abc123",
+                        "artifacts": {
+                            "alerts_jsonl": "{...}\\n",
+                            "decisions_jsonl": "{...}\\n",
+                            "trust_jsonl": "{...}\\n",
+                        },
+                        "summary": {"replay": {"total_events": 7}, "score": {"decisions_rows": 4}},
+                    }
+                }
+            }
+        },
+        400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+def run_endpoint(req: RunRequest, request: Request):
+    rid = getattr(request.state, "request_id", _request_id())
+
+    with tempfile.TemporaryDirectory(prefix="blackice_api_") as d:
+        dpath = Path(d)
+        events = str(dpath / "events.jsonl")
+        alerts = str(dpath / "alerts.jsonl")
+        decisions = str(dpath / "decisions.jsonl")
+        trust = str(dpath / "trust.jsonl")
+
+        _write_text(events, req.events_jsonl)
+
+        # 1) replay -> alerts
+        replay_summary = run_replay(events, alerts)
+
+        # 2) score -> decisions
+        # score_alerts signature does NOT accept audit_mode; audit happens in CLI main for run/decide.
+        score_summary: Dict[str, Any] = score_alerts(alerts, decisions)
+
+        # 3) trust
+        trust_summary = emit_trust_from_decisions(decisions, trust)
+
+        artifacts = Artifacts(
+            alerts_jsonl=_read_text(alerts),
+            decisions_jsonl=_read_text(decisions),
+            trust_jsonl=_read_text(trust),
         )
 
-        rc = cmd_run(args)
-        if rc != 0:
-            raise HTTPException(status_code=500, detail={"ok": False, "exit_code": rc})
+        summary = {
+            "replay": replay_summary,
+            "score": score_summary,
+            "trust": trust_summary,
+            "audit_mode": req.audit_mode,
+            "normalize": req.normalize,
+        }
 
-        alerts_path = outdir / "alerts.jsonl"
-        decisions_path = outdir / "decisions.jsonl"
-        trust_path = outdir / "trust.jsonl"
+        # NOTE: normalize/audit enforcement is done in CLI; this API endpoint focuses on returning artifacts.
+        # If you want API-level strict enforcement, we can add normalization step here next.
 
-        artifacts = RunArtifacts(
-            alerts_jsonl=_read_text(alerts_path),
-            decisions_jsonl=_read_text(decisions_path),
-            trust_jsonl=_read_text(trust_path) if trust_path.exists() else None,
-        )
-
-        audit = _try_read_audit(outdir) if req.audit_mode != "off" else None
-        return RunResponse(ok=True, artifacts=artifacts, audit=audit)
+        resp = RunResponse(request_id=rid, artifacts=artifacts, summary=summary)
+        return JSONResponse(resp.model_dump(), status_code=200)
