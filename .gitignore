@@ -36,3 +36,31 @@ ssot_run.sh
 
 # Build artifacts
 *.egg-info/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Local env files
+.env
+.env.*
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Python tools cache
+.pytest_cache/
+.mypy_cache/
+.pyre/
+
+# Pip / wheel cache
+pip-wheel-metadata/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Lockfiles
+poetry.lock
