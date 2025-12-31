@@ -21,4 +21,8 @@ The `app` service exposes port 8080 and runs uvicorn with `--reload`.
 ## CI image
 A GitHub Actions workflow `docker-build.yml` builds and pushes multi-arch images to GitHub Container Registry (`ghcr.io/<owner>/blackice`) when changes are pushed to `main`.
 
+The workflow uses cache helpers to speed builds:
+- Pip packages are cached across test runs using `actions/cache` keyed on `requirements-dev.txt`.
+- Docker Buildx uses GitHub Actions cache (`type=gha`) to persist build layers across runs (via `cache-from` / `cache-to`).
+
 Make sure you have `GITHUB_TOKEN` or appropriate secrets configured to push images to GHCR.

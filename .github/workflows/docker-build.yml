@@ -15,6 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -48,6 +55,8 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.sha }}
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   integration:
     needs: test
@@ -58,7 +67,10 @@ jobs:
         uses: docker/setup-buildx-action@v2
       - name: Build image for integration
         run: |
-          docker build -t blackice:ci -f Dockerfile .
+          docker buildx build --load \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
+            -t blackice:ci -f Dockerfile .
       - name: Start container
         run: |
           docker run -d --name blackice-ci -p 8080:8080 blackice:ci
