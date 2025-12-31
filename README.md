@@ -214,6 +214,8 @@ BlackIce makes this explicit and enforceable.
 - warn: writes an audit report only if output changes
 - strict: fails the pipeline if normalization would change output
 
+**See**: [`docs/normalization.md`](docs/normalization.md) for the full normalization contract and recommended tests.
+
 ### Example
 
 ```bash
