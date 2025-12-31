@@ -127,7 +127,24 @@ def healthz(request: Request):
             }
         },
         400: {"model": ErrorResponse},
-        409: {"model": ErrorResponse},
+        409: {
+            "description": "Normalization audit violation (AUDIT_NORMALIZATION)",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ok": False,
+                        "request_id": "req-abc123",
+                        "error": {
+                            "code": "AUDIT_NORMALIZATION",
+                            "message": "Decisions normalization changed output in strict audit mode.",
+                            "details": {"normalized_count": 1, "audit_mode": "strict"}
+                        },
+                        "hint": "Set audit_mode=warn or normalize=False to bypass."
+                    }
+                }
+            }
+        },
         500: {"model": ErrorResponse},
     },
 )
